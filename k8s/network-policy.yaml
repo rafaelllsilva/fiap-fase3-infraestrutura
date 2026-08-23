@@ -1,0 +1,42 @@
+---
+# Política 1: protege o PostgreSQL, aceitando conexões apenas da aplicação Java.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-security-policy
+  namespace: tech-challenge
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres_db
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: spring-app
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# Política 2: protege a aplicação Java, aceitando conexões de entrada apenas
+# de dentro do cluster (mesmo bloco de rede dos pods).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: app-security-policy
+  namespace: tech-challenge
+spec:
+  podSelector:
+    matchLabels:
+      app: spring-app
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 8080
