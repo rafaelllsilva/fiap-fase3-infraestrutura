@@ -78,6 +78,10 @@ spec:
       spec:
         # Sem storageClassName: usa a StorageClass padrão do cluster. No Kind
         # é o local-path provisioner (standard), que provisiona o PVC sozinho.
+        # No EKS não existe default de fábrica (a "gp2" que a AWS cria não é
+        # anotada como default e usa o provisionador in-tree já removido do
+        # Kubernetes), então quem supre isso é o kubernetes_storage_class_v1
+        # .ebs_gp3 em infra/main.tf. Sem ele o PVC fica Pending para sempre.
         accessModes: ["ReadWriteOnce"]
         resources:
           requests:

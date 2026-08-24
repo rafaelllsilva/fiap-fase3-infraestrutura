@@ -210,7 +210,8 @@ resource "aws_eks_addon" "coredns" {
 # Necessário para o Postgres: o volumeClaimTemplates de
 # k8s/database/postgres.yaml pede 1Gi da StorageClass padrão. Sem um
 # provisionador de EBS o PVC fica Pending e o wait_for_rollout do StatefulSet
-# trava.
+# trava. Atenção: o addon instala apenas o *driver* — quem cria a StorageClass
+# padrão é o kubernetes_storage_class_v1.ebs_gp3 logo abaixo.
 resource "aws_eks_addon" "ebs_csi_driver" {
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = "aws-ebs-csi-driver"
@@ -224,6 +225,47 @@ resource "aws_eks_addon" "ebs_csi_driver" {
     ManagedBy   = "Terraform"
     Project     = var.project_name
   }
+}
+
+# StorageClass padrão do cluster, atendida pelo driver CSI do addon acima.
+#
+# Por que precisa existir: o volumeClaimTemplates do Postgres omite
+# storageClassName de propósito (herança do Kind, onde o local-path provisioner
+# é o padrão), então depende de haver uma StorageClass default no cluster. A
+# EKS só traz de fábrica a "gp2", que NÃO é anotada como default e ainda usa o
+# provisionador in-tree kubernetes.io/aws-ebs — removido do Kubernetes e inerte
+# na 1.33. Sem este recurso o PVC fica Pending com "no persistent volumes
+# available for this claim and no storage class is set", o postgres-0 nunca é
+# escalonado, o postgres-service fica sem endpoints e a app morre em
+# CrashLoopBackOff no Flyway (Connection refused).
+#
+# volume_binding_mode = WaitForFirstConsumer porque um volume EBS é preso a uma
+# AZ: com "Immediate" o volume pode nascer numa AZ onde o pod não cabe.
+# encrypted usa a chave gerenciada aws/ebs, que não exige kms:CreateKey — o
+# mesmo caminho já usado pelo aws_launch_template.node e que funciona no lab.
+#
+# Primeiro (e hoje único) uso do provider kubernetes: um objeto nativo e
+# tipado, em vez de YAML cru via kubectl_manifest.
+resource "kubernetes_storage_class_v1" "ebs_gp3" {
+  metadata {
+    name = "gp3"
+
+    annotations = {
+      "storageclass.kubernetes.io/is-default-class" = "true"
+    }
+  }
+
+  storage_provisioner    = "ebs.csi.aws.com"
+  volume_binding_mode    = "WaitForFirstConsumer"
+  allow_volume_expansion = true
+  reclaim_policy         = "Delete"
+
+  parameters = {
+    type      = "gp3"
+    encrypted = "true"
+  }
+
+  depends_on = [aws_eks_addon.ebs_csi_driver]
 }
 
 # Necessário para o HPA de k8s/app/app-escalavel.yaml, que escala por CPU e
@@ -337,12 +379,6 @@ resource "aws_eks_node_group" "this" {
     ManagedBy   = "Terraform"
     Project     = var.project_name
   }
-}
-
-# Token de autenticação usado pelos providers kubernetes e kubectl
-# (providers.tf) para falar com a API do cluster recém-criado.
-data "aws_eks_cluster_auth" "this" {
-  name = aws_eks_cluster.this.name
 }
 
 # ---------------------------------------------------------------------------
@@ -485,6 +521,7 @@ resource "kubectl_manifest" "database_postgres" {
     kubectl_manifest.database_configmap,
     kubectl_manifest.database_secret,
     aws_eks_addon.ebs_csi_driver,
+    kubernetes_storage_class_v1.ebs_gp3,
   ]
 }
 
