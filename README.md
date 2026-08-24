@@ -15,10 +15,6 @@ k8s/       manifestos aplicados no cluster
   └── app/        app Spring (secret, Deployment+Service+HPA, network policy, PDB)
 ```
 
-> `infra/README.md` é de uma versão anterior do projeto e está desatualizado (menciona
-> t3.micro, IRSA, ALB e Prometheus/Grafana, que não existem no código). Use **este** README
-> e o `.claude/CLAUDE.md` como fonte de verdade.
-
 ## Pré-requisitos
 
 | Ferramenta | Versão | Para quê |
@@ -26,7 +22,7 @@ k8s/       manifestos aplicados no cluster
 | Terraform | >= 1.10.0 | exigido pelo locking nativo do backend S3 (`use_lockfile`) |
 | AWS CLI | v2 | credenciais, `eks get-token`, login no ECR |
 | Docker | recente | build e push da imagem |
-| kubectl | compatível com 1.33 | acesso ao cluster |
+| kubectl | compatível com 1.34 | acesso ao cluster |
 
 Credenciais AWS válidas na cadeia padrão do SDK. Numa conta do **AWS Academy Learner Lab**
 a sessão expira junto com o lab — confirme antes de começar:
@@ -92,7 +88,7 @@ export TF_VAR_jwt_secret="..."      # sensitive, mínimo 32 caracteres
 ```
 
 Principais defaults: `aws_region=us-east-1`, `cluster_name=tech-challenge`,
-`kubernetes_version=1.33`, `node_instance_type=t3.small`, `node_desired_size=2`,
+`kubernetes_version=1.34`, `node_instance_type=t3.small`, `node_desired_size=2`,
 `ecr_repository_name=tech-challenge-app`, `lab_role_name=LabRole`.
 
 ### Republicar a imagem depois de um rebuild
@@ -108,6 +104,43 @@ terraform -chdir=infra apply -replace=null_resource.push_image
 Em CI, o caminho melhor é passar uma tag única por build
 (`TF_VAR_app_image=tech-challenge-app:<git-sha>`): a tag entra no trigger e cada build
 republica sozinho.
+
+### Subir a versão do Kubernetes
+
+`var.kubernetes_version` alimenta **o cluster e o node group**, então mudar a variável sobe
+os dois no mesmo apply. Os addons são o passo à parte.
+
+```bash
+# 1. conferir o que a AWS oferece (o EKS sobe um minor por vez, e é irreversível)
+aws eks describe-cluster-versions --region us-east-1 \
+  --query 'clusterVersions[].{v:clusterVersion,status:status}' --output table
+
+# 2. control plane + nós
+terraform -chdir=infra plan -out=tfplan   # espere update in-place, nunca replace do cluster
+terraform -chdir=infra apply tfplan
+
+# 3. addons: como addon_version não é declarado (a AWS escolhe o default da
+#    versão do cluster), só a recriação faz cada um pegar a versão nova
+terraform -chdir=infra apply \
+  -replace=aws_eks_addon.kube_proxy \
+  -replace=aws_eks_addon.vpc_cni \
+  -replace=aws_eks_addon.coredns \
+  -replace=aws_eks_addon.ebs_csi_driver \
+  -replace=aws_eks_addon.metrics_server
+```
+
+> **Cuidado com o upgrade pela metade.** `version` no node group e `addon_version` nos
+> addons são `Optional + Computed`: sem valor no config, o Terraform lê o que existe na AWS
+> e não propõe diferença. Foi por isso que `version = var.kubernetes_version` foi declarado
+> explicitamente no node group — sem ele, um upgrade atualizaria só o control plane e
+> deixaria os nós para trás com o apply terminando limpo.
+
+Durante a rotação dos nós (`max_unavailable = 1`, um nó por vez) a aplicação continua de pé
+graças às 2 réplicas e ao PodDisruptionBudget, mas o `postgres-0` é réplica única sem PDB:
+ele é despejado e reagendado, e a app entra em CrashLoopBackOff até o banco voltar. É
+esperado e se resolve sozinho. Se o `postgres-0` ficar `Pending`, veja se é conflito de AZ
+do volume EBS — `kubectl describe pod postgres-0 -n tech-challenge` procurando
+`volume node affinity conflict`.
 
 ### Destruir
 

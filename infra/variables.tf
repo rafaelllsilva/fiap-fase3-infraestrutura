@@ -48,8 +48,8 @@ variable "cluster_name" {
 
 variable "kubernetes_version" {
   type        = string
-  default     = "1.33"
-  description = "Versão do Kubernetes do cluster EKS. Consulte as versões atualmente suportadas pela AWS antes de alterar o default."
+  default     = "1.34"
+  description = "Versão do Kubernetes do cluster EKS e do managed node group (aws_eks_node_group.this também usa esta variável, para os nós não ficarem para trás num upgrade). Consulte as versões atualmente suportadas pela AWS antes de alterar o default — o EKS sobe um minor por vez e o upgrade é irreversível. Liste as opções com: aws eks describe-cluster-versions --region <região>."
 }
 
 variable "lab_role_name" {

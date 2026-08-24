@@ -352,6 +352,17 @@ resource "aws_eks_node_group" "this" {
   node_role_arn   = local.lab_role_arn
   subnet_ids      = module.vpc.private_subnets
 
+  # Amarra a versão do kubelet à do control plane. Sem este atributo ele é
+  # Optional+Computed: o Terraform lê a versão que já existe na AWS, grava no
+  # state e não propõe diferença nenhuma — de modo que subir
+  # var.kubernetes_version atualizaria só o cluster e deixaria os nós para trás
+  # em silêncio, com o apply terminando limpo.
+  #
+  # Funciona porque aws_launch_template.node não define image_id: o EKS segue
+  # escolhendo a AMI a partir de ami_type + version. Se alguém fixar image_id
+  # lá, este atributo perde efeito e o upgrade dos nós vira manual.
+  version = var.kubernetes_version
+
   instance_types = [var.node_instance_type]
   ami_type       = "AL2023_x86_64_STANDARD"
   capacity_type  = "ON_DEMAND"
