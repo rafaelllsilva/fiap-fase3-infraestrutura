@@ -243,6 +243,66 @@ resource "aws_eks_addon" "metrics_server" {
   }
 }
 
+# --- Launch template dos nós -----------------------------------------------
+# Existe por um motivo só: elevar o hop limit do IMDSv2 de 1 para 2.
+#
+# As AMIs EKS AL2023 usam hop limit 1 de propósito, para impedir que pods
+# assumam a IAM role do nó — o caminho suportado pela AWS é dar credenciais
+# próprias ao pod via IRSA ou EKS Pod Identity. Neste lab os dois estão
+# bloqueados (ver "Ambiente de laboratório" no CLAUDE.md), então os pods que
+# precisam da AWS API dependem mesmo da role do nó via IMDS.
+#
+# Com hop limit 1 o pacote de um pod até 169.254.169.254 morre no salto
+# veth -> host, e o ebs-csi-controller (que não usa hostNetwork) entra em
+# CrashLoopBackOff com "no EC2 IMDS role found ... context deadline exceeded".
+# Com 2, ele alcança o IMDS e assume a LabRole normalmente.
+#
+# Sem image_id/instance_type aqui de propósito: o EKS continua injetando a AMI
+# (via ami_type) e o user-data de bootstrap do node group.
+resource "aws_launch_template" "node" {
+  name_prefix = "${var.cluster_name}-node-"
+  description = "Nós do EKS com IMDSv2 alcançável por pods (hop limit 2)"
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required" # IMDSv2 obrigatório
+    http_put_response_hop_limit = 2
+  }
+
+  # disk_size não pode ser usado no node group junto com launch_template —
+  # o tamanho do disco raiz passa a ser definido aqui.
+  block_device_mappings {
+    device_name = "/dev/xvda"
+
+    ebs {
+      volume_size           = 20
+      volume_type           = "gp3"
+      encrypted             = true
+      delete_on_termination = true
+    }
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+
+    tags = {
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+      Project     = var.project_name
+    }
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    Project     = var.project_name
+  }
+}
+
 # --- Managed node group ----------------------------------------------------
 resource "aws_eks_node_group" "this" {
   cluster_name    = aws_eks_cluster.this.name
@@ -253,7 +313,11 @@ resource "aws_eks_node_group" "this" {
   instance_types = [var.node_instance_type]
   ami_type       = "AL2023_x86_64_STANDARD"
   capacity_type  = "ON_DEMAND"
-  disk_size      = 20
+
+  launch_template {
+    id      = aws_launch_template.node.id
+    version = aws_launch_template.node.latest_version
+  }
 
   scaling_config {
     min_size     = var.node_min_size
