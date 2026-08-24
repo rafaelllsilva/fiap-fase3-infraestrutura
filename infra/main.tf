@@ -89,101 +89,184 @@ module "vpc" {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Cluster EKS + Managed Node Group
+# 3. Cluster EKS + addons + Managed Node Group
 # ---------------------------------------------------------------------------
-# Módulo oficial via registry. ATENÇÃO: no ambiente de laboratório (AWS
-# Academy Learner Lab), o módulo (v20+, incluindo esta v21.25) chama
-# iam:GetRole de forma incondicional via data.aws_iam_session_context (sem
-# nenhuma flag para desativar — confirmado lendo o código-fonte do módulo em
-# várias versões), o que é negado pela policy do lab e quebra `plan`/`apply`
-# nesse ambiente. Uma cópia local patcheada (removendo só esse data source)
-# chegou a ser usada para contornar isso, mas foi revertida a pedido do
-# usuário — esse problema específico segue em aberto, sem solução aplicada
-# aqui. Os ajustes abaixo (reaproveitar var.lab_role_name, IRSA/KMS
-# desabilitados, acesso via access_entries) continuam válidos e cobrem os
-# outros bloqueios do lab (iam:CreateRole/iam:CreateOpenIDConnectProvider),
-# mas não resolvem o iam:GetRole. Ver "Ambiente de laboratório (AWS Academy
+# Recursos nativos do provider aws, e não o módulo
+# terraform-aws-modules/eks/aws: a partir da v20 esse módulo declara
+# `data "aws_iam_session_context" "current"` de forma incondicional (sem
+# nenhuma flag para desativar), o que dispara um iam:GetRole sobre a role da
+# sessão — negado explicitamente pela policy do AWS Academy Learner Lab e,
+# portanto, quebrando `plan`/`apply` neste ambiente. Nenhum dos recursos
+# abaixo faz leitura de IAM. Ver "Ambiente de laboratório (AWS Academy
 # Learner Lab)" no CLAUDE.md.
 data "aws_caller_identity" "current" {}
 
 locals {
-  # Deriva o ARN da role da sessão atual (ex.: voclabs) só por parsing de
-  # string, sem nenhuma chamada IAM — evita repetir o erro de iam:GetRole.
-  # Assume path "/" (padrão em roles de laboratório AWS Academy).
-  caller_role_name = split("/", data.aws_caller_identity.current.arn)[1]
-  caller_role_arn  = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.caller_role_name}"
-
   # Role de serviço pré-existente do lab (ex.: LabRole), reaproveitada como
-  # IAM role do cluster e dos node groups — o ambiente não permite
-  # iam:CreateRole.
+  # IAM role do cluster e do node group — o ambiente não permite
+  # iam:CreateRole. Ela confia tanto em eks.amazonaws.com quanto em
+  # ec2.amazonaws.com, então serve às duas pontas. O ARN é montado só por
+  # concatenação de string, sem nenhuma chamada IAM.
   lab_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.lab_role_name}"
 }
 
-module "eks" {
-  source  = "terraform-aws-modules/eks/aws"
-  version = "~> 21.25"
+resource "aws_eks_cluster" "this" {
+  name     = var.cluster_name
+  role_arn = local.lab_role_arn
+  version  = var.kubernetes_version
 
-  name               = var.cluster_name
-  kubernetes_version = var.kubernetes_version
+  vpc_config {
+    subnet_ids = module.vpc.private_subnets
 
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnets
-
-  # Endpoint público habilitado para o runner de CI aplicar os manifestos
-  # (kubectl_manifest, abaixo) e o desenvolvedor local acessarem o cluster
-  # sem VPN/bastion (cenário de estudo). Em produção, restrinja via
-  # endpoint_public_access_cidrs ou desabilite.
-  endpoint_public_access  = true
-  endpoint_private_access = true
-
-  # Reaproveita a role de serviço pré-existente do lab em vez de deixar o
-  # módulo criar uma nova (iam:CreateRole é negado no ambiente).
-  create_iam_role = false
-  iam_role_arn    = local.lab_role_arn
-
-  # IRSA (OIDC provider) não é usado hoje no projeto e exigiria
-  # iam:CreateOpenIDConnectProvider, também negado no ambiente.
-  enable_irsa = false
-
-  # Sem KMS key própria para os secrets do etcd (kms:CreateKey também seria
-  # um risco de permissão negada no lab, e não é essencial para o projeto de
-  # estudo).
-  create_kms_key = false
-
-  # enable_cluster_creator_admin_permissions (mecanismo automático da v20+)
-  # também dependeria do data source removido — em vez disso, concede admin
-  # explicitamente via Access Entry para a role da sessão atual (estável
-  # entre logins do lab, diferente da sessão STS efêmera).
-  enable_cluster_creator_admin_permissions = false
-  access_entries = {
-    lab_session = {
-      principal_arn = local.caller_role_arn
-      policy_associations = {
-        admin = {
-          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = {
-            type = "cluster"
-          }
-        }
-      }
-    }
+    # Endpoint público habilitado para o runner de CI aplicar os manifestos
+    # (kubectl_manifest, abaixo) e o desenvolvedor local acessarem o cluster
+    # sem VPN/bastion (cenário de estudo). Em produção, restrinja via
+    # public_access_cidrs ou desabilite.
+    endpoint_public_access  = true
+    endpoint_private_access = true
   }
 
-  eks_managed_node_groups = {
-    default = {
-      instance_types = [var.node_instance_type]
-      ami_type       = "AL2023_x86_64_STANDARD"
-
-      # Mesma restrição do cluster acima: reaproveita a role do lab em vez
-      # de criar uma role nova para o node group.
-      create_iam_role = false
-      iam_role_arn    = local.lab_role_arn
-
-      min_size     = var.node_min_size
-      max_size     = var.node_max_size
-      desired_size = var.node_desired_size
-    }
+  # authentication_mode = "API" -> Access Entries (mecanismo atual do EKS),
+  # sem o ConfigMap aws-auth. bootstrap_cluster_creator_admin_permissions
+  # deixa a própria AWS resolver o principal criador server-side e lhe dar
+  # admin no cluster: diferente do módulo, não há chamada iam:GetRole nem
+  # parsing de ARN do nosso lado. A AWS normaliza a sessão STS para o ARN da
+  # role (ex.: .../role/voclabs), que é estável entre logins do lab.
+  access_config {
+    authentication_mode                         = "API"
+    bootstrap_cluster_creator_admin_permissions = true
   }
+
+  # Deliberadamente fora: encryption_config (kms:CreateKey é risco de
+  # permissão negada no lab e não é essencial num cluster de estudo),
+  # enabled_cluster_log_types (CloudWatch, custo/permissão extra), provider
+  # OIDC/IRSA (exigiria iam:CreateOpenIDConnectProvider, negado) e
+  # security_group_ids próprios — o EKS cria e gerencia sozinho o cluster
+  # security group que liga control plane e managed node group.
+  #
+  # bootstrap_self_managed_addons fica no default (true): o cluster nasce com
+  # CNI funcionando e os aws_eks_addon abaixo adotam a instalação via
+  # resolve_conflicts_on_create = "OVERWRITE". Alterar esse atributo depois
+  # força recriação do cluster.
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    Project     = var.project_name
+  }
+}
+
+# --- Addons do EKS ---------------------------------------------------------
+# Sem addon_version: a AWS escolhe a versão default da versão do cluster.
+# Sem service_account_role_arn: IRSA está desabilitado, então os addons usam
+# a IAM role do nó (local.lab_role_arn).
+
+# CNI e kube-proxy são DaemonSets: ficam ACTIVE mesmo antes de existir nó, por
+# isso são criados antes do node group (que depende deles).
+resource "aws_eks_addon" "vpc_cni" {
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = "vpc-cni"
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    Project     = var.project_name
+  }
+}
+
+resource "aws_eks_addon" "kube_proxy" {
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = "kube-proxy"
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    Project     = var.project_name
+  }
+}
+
+# Os três addons abaixo rodam como Deployment: sem nó schedulável o addon
+# fica DEGRADED e o Terraform falha na criação — daí o depends_on no node
+# group.
+resource "aws_eks_addon" "coredns" {
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = "coredns"
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.this]
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    Project     = var.project_name
+  }
+}
+
+# Necessário para o Postgres: o volumeClaimTemplates de
+# k8s/database/postgres.yaml pede 1Gi da StorageClass padrão. Sem um
+# provisionador de EBS o PVC fica Pending e o wait_for_rollout do StatefulSet
+# trava.
+resource "aws_eks_addon" "ebs_csi_driver" {
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = "aws-ebs-csi-driver"
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.this]
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    Project     = var.project_name
+  }
+}
+
+# Necessário para o HPA de k8s/app/app-escalavel.yaml, que escala por CPU e
+# memória (item 3.2 do enunciado) — sem métricas ele fica inativo (<unknown>).
+resource "aws_eks_addon" "metrics_server" {
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = "metrics-server"
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.this]
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    Project     = var.project_name
+  }
+}
+
+# --- Managed node group ----------------------------------------------------
+resource "aws_eks_node_group" "this" {
+  cluster_name    = aws_eks_cluster.this.name
+  node_group_name = "default"
+  node_role_arn   = local.lab_role_arn
+  subnet_ids      = module.vpc.private_subnets
+
+  instance_types = [var.node_instance_type]
+  ami_type       = "AL2023_x86_64_STANDARD"
+  capacity_type  = "ON_DEMAND"
+  disk_size      = 20
+
+  scaling_config {
+    min_size     = var.node_min_size
+    max_size     = var.node_max_size
+    desired_size = var.node_desired_size
+  }
+
+  update_config {
+    max_unavailable = 1
+  }
+
+  # Os nós só ficam Ready com a CNI instalada; kube-proxy pela mesma razão.
+  depends_on = [aws_eks_addon.vpc_cni, aws_eks_addon.kube_proxy]
 
   tags = {
     Environment = var.environment
@@ -195,7 +278,7 @@ module "eks" {
 # Token de autenticação usado pelos providers kubernetes e kubectl
 # (providers.tf) para falar com a API do cluster recém-criado.
 data "aws_eks_cluster_auth" "this" {
-  name = module.eks.cluster_name
+  name = aws_eks_cluster.this.name
 }
 
 # ---------------------------------------------------------------------------
@@ -289,12 +372,22 @@ locals {
   app_deployment_docs     = [for d in split("\n---\n", "\n${local.app_deployment_raw}") : trimspace(d) if trimspace(d) != ""]
   app_netpol_docs         = [for d in split("\n---\n", "\n${local.app_netpol_raw}") : trimspace(d) if trimspace(d) != ""]
   app_pdb_docs            = [for d in split("\n---\n", "\n${local.app_pdb_raw}") : trimspace(d) if trimspace(d) != ""]
+
+  # app_deployment_docs é o único cujo conteúdo depende de um recurso
+  # (local.ecr_image -> aws_ecr_repository.this.repository_url, só conhecido
+  # após o apply). O `count` de um resource precisa ser conhecido já no plan,
+  # então a contagem de documentos é derivada do arquivo CRU: o templatefile
+  # apenas substitui valores inline, nunca muda o número de documentos YAML.
+  app_deployment_doc_count = length([
+    for d in split("\n---\n", "\n${file("${local.manifests_path}/app/app-escalavel.yaml")}") : d
+    if trimspace(d) != ""
+  ])
 }
 
 resource "kubectl_manifest" "namespace" {
   count      = length(local.namespace_docs)
   yaml_body  = local.namespace_docs[count.index]
-  depends_on = [module.eks]
+  depends_on = [aws_eks_node_group.this]
 }
 
 resource "kubectl_manifest" "database_configmap" {
@@ -318,21 +411,34 @@ resource "kubectl_manifest" "app_secret" {
 # Banco de dados: aplicado depois do config/secret. wait_for_rollout = true faz
 # o Terraform esperar o StatefulSet ficar Ready (readinessProbe = pg_isready)
 # antes de seguir — assim a app abaixo só sobe com o banco aceitando conexões.
+# Depende também do EBS CSI driver: sem ele o PVC do volumeClaimTemplates
+# nunca sai de Pending e o wait_for_rollout trava.
 resource "kubectl_manifest" "database_postgres" {
   count            = length(local.database_postgres_docs)
   yaml_body        = local.database_postgres_docs[count.index]
   wait_for_rollout = true
-  depends_on       = [kubectl_manifest.database_configmap, kubectl_manifest.database_secret]
+  depends_on = [
+    kubectl_manifest.database_configmap,
+    kubectl_manifest.database_secret,
+    aws_eks_addon.ebs_csi_driver,
+  ]
 }
 
 # Aplicação: só depois do banco pronto e da imagem publicada no ECR.
 # wait_for_rollout = true faz o apply esperar o Deployment ficar disponível
 # (readinessProbe = /actuator/health/readiness), ou seja, app de pé e conectada.
+# O metrics-server entra no depends_on porque o HPA vai no mesmo arquivo do
+# Deployment e depende dele para ter métricas.
 resource "kubectl_manifest" "app_deployment" {
-  count            = length(local.app_deployment_docs)
+  count            = local.app_deployment_doc_count
   yaml_body        = local.app_deployment_docs[count.index]
   wait_for_rollout = true
-  depends_on       = [kubectl_manifest.database_postgres, kubectl_manifest.app_secret, null_resource.push_image]
+  depends_on = [
+    kubectl_manifest.database_postgres,
+    kubectl_manifest.app_secret,
+    null_resource.push_image,
+    aws_eks_addon.metrics_server,
+  ]
 }
 
 resource "kubectl_manifest" "database_network_policy" {

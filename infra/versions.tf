@@ -1,6 +1,6 @@
 terraform {
-  # >= 1.10.0 é exigido pelo locking nativo do backend S3 (use_lockfile,
-  # ver backend abaixo), acima do >= 1.5.7 mínimo do módulo EKS.
+  # >= 1.10.0 é exigido pelo locking nativo do backend S3 (use_lockfile, ver
+  # backend.tf).
   required_version = ">= 1.10.0"
 
   required_providers {
@@ -26,18 +26,6 @@ terraform {
     null = {
       source  = "hashicorp/null"
       version = "~> 3.0"
-    }
-    # Usados internamente pelo módulo terraform-aws-modules/eks/aws (TLS do
-    # provedor OIDC do cluster e temporização entre criação de recursos
-    # IAM). Nenhum dos dois exige bloco `provider {}` próprio; declarados
-    # aqui para manter o lock file explícito e a versão fixada.
-    tls = {
-      source  = "hashicorp/tls"
-      version = ">= 4.0"
-    }
-    time = {
-      source  = "hashicorp/time"
-      version = ">= 0.9"
     }
   }
 }

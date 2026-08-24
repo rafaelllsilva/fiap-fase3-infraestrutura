@@ -55,7 +55,7 @@ variable "kubernetes_version" {
 variable "lab_role_name" {
   type        = string
   default     = "LabRole"
-  description = "Nome da IAM role de serviço pré-existente no ambiente de laboratório (AWS Academy Learner Lab), reaproveitada como IAM role do cluster EKS e dos node groups — o ambiente não permite iam:CreateRole nem iam:GetRole. Ajuste via TF_VAR_lab_role_name se o nome real na sua conta for diferente. Ver seção \"Ambiente de laboratório (AWS Academy Learner Lab)\" no CLAUDE.md."
+  description = "Nome da IAM role de serviço pré-existente no ambiente de laboratório (AWS Academy Learner Lab), reaproveitada como IAM role do cluster EKS e do node group — o ambiente não permite iam:CreateRole. Ela precisa confiar em eks.amazonaws.com e ec2.amazonaws.com e ter as policies AmazonEKSClusterPolicy, AmazonEKSWorkerNodePolicy e AmazonEC2ContainerRegistryReadOnly (a LabRole padrão do lab já atende). Ajuste via TF_VAR_lab_role_name se o nome real na sua conta for diferente. Ver seção \"Ambiente de laboratório (AWS Academy Learner Lab)\" no CLAUDE.md."
 }
 
 # ---------------------------------------------------------------------------
@@ -64,25 +64,25 @@ variable "lab_role_name" {
 
 variable "node_instance_type" {
   type        = string
-  default     = "t3.micro"
-  description = "Tipo de instância EC2 usado pelo managed node group do EKS."
+  default     = "t3.small"
+  description = "Tipo de instância EC2 usado pelo managed node group do EKS. t3.small (2 vCPU / 2 GB, teto de 11 pods por nó) é o mínimo viável para o workload atual: a app pede 2 réplicas de 250m CPU e 512Mi cada, mais o Postgres e os addons. Em t3.micro (1 GB, teto de 4 pods, já consumidos pelo coredns) os pods ficam Pending."
 }
 
 variable "node_min_size" {
   type        = number
-  default     = 1
-  description = "Número mínimo de nós no managed node group (limite inferior do Auto Scaling Group)."
+  default     = 2
+  description = "Número mínimo de nós no managed node group (limite inferior do Auto Scaling Group). 2 para espalhar as duas réplicas da app e satisfazer o PodDisruptionBudget."
 }
 
 variable "node_max_size" {
   type        = number
-  default     = 3
+  default     = 4
   description = "Número máximo de nós no managed node group (limite superior do Auto Scaling Group)."
 }
 
 variable "node_desired_size" {
   type        = number
-  default     = 1
+  default     = 2
   description = "Número desejado de nós no managed node group ao provisionar o cluster."
 }
 

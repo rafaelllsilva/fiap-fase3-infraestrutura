@@ -32,12 +32,12 @@ provider "aws" {
 # ---------------------------------------------------------------------------
 # Provider Kubernetes (HashiCorp)
 # ---------------------------------------------------------------------------
-# Autentica no cluster EKS usando os outputs do módulo eks (main.tf) e um
-# token de curta duração via data.aws_eks_cluster_auth.this (também em
-# main.tf).
+# Autentica no cluster EKS usando os atributos de aws_eks_cluster.this
+# (main.tf) e um token de curta duração via data.aws_eks_cluster_auth.this
+# (também em main.tf).
 provider "kubernetes" {
-  host                   = module.eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+  host                   = aws_eks_cluster.this.endpoint
+  cluster_ca_certificate = base64decode(aws_eks_cluster.this.certificate_authority[0].data)
   token                  = data.aws_eks_cluster_auth.this.token
 }
 
@@ -50,8 +50,8 @@ provider "kubernetes" {
 # validação de schema contra a API do cluster durante o `plan`, o que quebra
 # quando o cluster é criado na mesma `apply` que aplica os manifestos.
 provider "kubectl" {
-  host                   = module.eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+  host                   = aws_eks_cluster.this.endpoint
+  cluster_ca_certificate = base64decode(aws_eks_cluster.this.certificate_authority[0].data)
   token                  = data.aws_eks_cluster_auth.this.token
   load_config_file       = false
 }
