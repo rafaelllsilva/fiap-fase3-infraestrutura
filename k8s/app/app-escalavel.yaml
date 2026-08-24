@@ -25,9 +25,9 @@ spec:
         fsGroup: 1000
       containers:
         - name: spring-app-container
-          # Imagem buildada no runner e carregada no Kind via `kind load`
-          # (sem registry). O valor é injetado pelo Terraform (var app_image).
-          # IfNotPresent usa a imagem já presente no nó.
+          # Imagem publicada no ECR pelo Terraform (null_resource.push_image,
+          # em infra/main.tf) antes deste deploy. O valor é injetado como a
+          # URL completa do repositório ECR + tag.
           image: "${app_image}"
           imagePullPolicy: IfNotPresent
           securityContext:
