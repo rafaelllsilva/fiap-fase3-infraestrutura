@@ -48,8 +48,8 @@ variable "cluster_name" {
 
 variable "kubernetes_version" {
   type        = string
-  default     = "1.34"
-  description = "Versão do Kubernetes do cluster EKS e do managed node group (aws_eks_node_group.this também usa esta variável, para os nós não ficarem para trás num upgrade). Consulte as versões atualmente suportadas pela AWS antes de alterar o default — o EKS sobe um minor por vez e o upgrade é irreversível. Liste as opções com: aws eks describe-cluster-versions --region <região>."
+  default     = "1.36"
+  description = "Versão do Kubernetes do cluster EKS e do managed node group (aws_eks_node_group.this também usa esta variável, para os nós não ficarem para trás num upgrade). Um cluster novo pode nascer em qualquer versão suportada, mas o UPGRADE de um cluster existente sobe um minor por vez — da 1.34 até a 1.36 seriam dois applies, com a 1.35 no meio. Desde julho de 2026 há rollback para o minor anterior dentro de 7 dias, mas trate isso como saída de emergência, não como plano. Liste as versões disponíveis com: aws eks describe-cluster-versions --region <região>."
 }
 
 variable "lab_role_name" {

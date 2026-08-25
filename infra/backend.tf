@@ -1,8 +1,4 @@
-# Backend S3 do state. O bucket NÃO é criado por este Terraform (problema de
-# ovo-e-galinha: ele precisa existir antes do `init`) — é criado uma única vez
-# à mão, ver a seção de bootstrap do bucket no CLAUDE.md. `use_lockfile = true`
-# usa o locking nativo do S3, sem precisar de uma tabela DynamoDB separada.
-
+# Backend S3 do state, criado manualmente pelo script script-criar-backend.sh
 terraform {
   backend "s3" {
     bucket       = "archtechs-infra"

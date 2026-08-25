@@ -22,7 +22,7 @@ k8s/       manifestos aplicados no cluster
 | Terraform | >= 1.10.0 | exigido pelo locking nativo do backend S3 (`use_lockfile`) |
 | AWS CLI | v2 | credenciais, `eks get-token`, login no ECR |
 | Docker | recente | build e push da imagem |
-| kubectl | compatível com 1.34 | acesso ao cluster |
+| kubectl | compatível com 1.36 | acesso ao cluster |
 
 Credenciais AWS válidas na cadeia padrão do SDK. Numa conta do **AWS Academy Learner Lab**
 a sessão expira junto com o lab — confirme antes de começar:
@@ -88,7 +88,7 @@ export TF_VAR_jwt_secret="..."      # sensitive, mínimo 32 caracteres
 ```
 
 Principais defaults: `aws_region=us-east-1`, `cluster_name=tech-challenge`,
-`kubernetes_version=1.34`, `node_instance_type=t3.small`, `node_desired_size=2`,
+`kubernetes_version=1.36`, `node_instance_type=t3.small`, `node_desired_size=2`,
 `ecr_repository_name=tech-challenge-app`, `lab_role_name=LabRole`.
 
 ### Republicar a imagem depois de um rebuild
@@ -110,10 +110,17 @@ republica sozinho.
 `var.kubernetes_version` alimenta **o cluster e o node group**, então mudar a variável sobe
 os dois no mesmo apply. Os addons são o passo à parte.
 
+> **Um minor por vez.** O EKS não aceita pular versões no upgrade: da 1.34 para a 1.36 são
+> dois ciclos completos, com a 1.35 no meio. A restrição vale só para cluster existente — um
+> cluster criado do zero pode nascer direto em qualquer versão suportada. Desde julho de
+> 2026 há rollback para o minor anterior dentro de 7 dias, mas conte com ele como saída de
+> emergência, não como plano.
+
 ```bash
-# 1. conferir o que a AWS oferece (o EKS sobe um minor por vez, e é irreversível)
+# 1. conferir o que a AWS oferece e o status de suporte de cada versão
 aws eks describe-cluster-versions --region us-east-1 \
-  --query 'clusterVersions[].{v:clusterVersion,status:status}' --output table
+  --query 'clusterVersions[].{v:clusterVersion,status:status,fimPadrao:endOfStandardSupportDate}' \
+  --output table
 
 # 2. control plane + nós
 terraform -chdir=infra plan -out=tfplan   # espere update in-place, nunca replace do cluster
