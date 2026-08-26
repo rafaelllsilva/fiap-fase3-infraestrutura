@@ -1,13 +1,16 @@
-# Provisiona a infraestrutura AWS (VPC + EKS + node group gerenciado + ECR)
-# e faz o deploy do banco de dados e da aplicação aplicando os manifestos de
-# /k8s — tudo via Terraform, como exige o item 3.3 do enunciado (sem kubectl
-# direto na pipeline para deploy). Roda inteiramente dentro do runner do
-# GitHub Actions.
+# Provisiona a infraestrutura: VPC, cluster EKS com addons, managed
+# node group, repositório ECR e as capacidades de cluster compartilhadas
+# (namespace, StorageClass default).
 #
-# Este módulo raiz mistura hoje duas responsabilidades — provisionamento de
-# infraestrutura (VPC/EKS/node group/ECR, de ciclo de vida longo) e deploy
-# de aplicação (Postgres/app, de ciclo de vida curto). O plano é desmembrar
-# essas duas partes futuramente — ver seção "Roadmap" no CLAUDE.md.
+# Este módulo NÃO implanta banco de dados nem aplicação. Esses componentes têm
+# ciclo de vida próprio (deploy frequente, enquanto a infraestrutura aqui leva
+# ~15-20 min e muda raramente) e vivem em repositórios separados, que se
+# integram a este lendo os valores de outputs.tf via:
+#
+#   data "terraform_remote_state" "infra" { backend = "s3" ... }
+#
+# Ou seja, outputs.tf é o contrato público deste módulo — ver README.md, seção
+# "Integração com os outros repositórios".
 
 # ---------------------------------------------------------------------------
 # 1. Zonas de disponibilidade e cálculo de subnets
@@ -152,7 +155,7 @@ resource "aws_eks_addon" "coredns" {
   }
 }
 
-# Necessário para volumeClaimTemplates do Postgres
+# Habilita volumes persistentes (PersistentVolumeClaim) no cluster
 resource "aws_eks_addon" "ebs_csi_driver" {
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = "aws-ebs-csi-driver"
@@ -191,7 +194,8 @@ resource "kubernetes_storage_class_v1" "ebs_gp3" {
   depends_on = [aws_eks_addon.ebs_csi_driver]
 }
 
-# Metrics server para o funcionamento do HPA
+# Fornece as métricas de CPU/memória consumidas por HorizontalPodAutoscaler.
+# Sem ele qualquer HPA dos outros repositórios fica em <unknown>.
 resource "aws_eks_addon" "metrics_server" {
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = "metrics-server"
@@ -290,13 +294,15 @@ resource "aws_eks_node_group" "this" {
 }
 
 # ---------------------------------------------------------------------------
-# 4. Repositório ECR e publicação da imagem da aplicação
+# 4. Repositório ECR
 # ---------------------------------------------------------------------------
 resource "aws_ecr_repository" "this" {
   name                 = var.ecr_repository_name
   image_tag_mutability = "MUTABLE"
 
-  # Faz o delete o repo ECR criado no destroy
+  # O repositório é apenas provisionado aqui; o build e o push da imagem são
+  # feitos pela pipeline do repositório da app, que consome o output
+  # `ecr_repository_url`. force_delete permite destruir o repo com imagens dentro.
   force_delete = true
 
   image_scanning_configuration {
@@ -310,137 +316,42 @@ resource "aws_ecr_repository" "this" {
   }
 }
 
-locals {
-  # Tag de destino no ECR,
-  app_image_tag = length(split(":", var.app_image)) > 1 ? split(":", var.app_image)[1] : "latest"
-  ecr_image     = "${aws_ecr_repository.this.repository_url}:${local.app_image_tag}"
-}
+# ---------------------------------------------------------------------------
+# 5. Recursos compartilhados no cluster
+# ---------------------------------------------------------------------------
+# Namespace onde os repositórios de banco de dados e de app deve ser implantados
+resource "kubernetes_namespace_v1" "this" {
+  metadata {
+    name = var.namespace
 
-# Push da imagem Docker no repositório ECR
-resource "null_resource" "push_image" {
-  triggers = {
-    image = var.app_image
-    repo  = aws_ecr_repository.this.repository_url
+    labels = {
+      "app.kubernetes.io/managed-by" = "Terraform"
+      environment                    = var.environment
+    }
   }
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${aws_ecr_repository.this.repository_url}
-      docker tag ${var.app_image} ${local.ecr_image}
-      docker push ${local.ecr_image}
-    EOT
-  }
-
-  depends_on = [aws_ecr_repository.this]
-}
-
-# ---------------------------------------------------------------------------
-# 5. Deploy dos manifestos YAML, em ordem de dependência (via depends_on).
-# ---------------------------------------------------------------------------
-locals {
-  manifests_path = "${path.module}/../k8s"
-
-  # Renderiza os manifestos (templatefile onde há variáveis, file() nos demais).
-  namespace_raw          = file("${local.manifests_path}/namespace.yaml")
-  database_configmap_raw = file("${local.manifests_path}/database/configmap.yaml")
-  database_postgres_raw  = file("${local.manifests_path}/database/postgres.yaml")
-  database_netpol_raw    = file("${local.manifests_path}/database/network-policy.yaml")
-  app_netpol_raw         = file("${local.manifests_path}/app/network-policy.yaml")
-  app_pdb_raw            = file("${local.manifests_path}/app/pod-disruption-budget.yaml")
-
-  database_secret_raw = templatefile("${local.manifests_path}/database/secret.yaml", {
-    db_password = var.db_password
-  })
-  app_secret_raw = templatefile("${local.manifests_path}/app/secret.yaml", {
-    jwt_secret = var.jwt_secret
-  })
-  app_deployment_raw = templatefile("${local.manifests_path}/app/app-escalavel.yaml", {
-    app_image = local.ecr_image
-  })
-
-  # Split de YAML multi-documento. Prefixa "\n" para que um "---" no início do
-  # arquivo vire um separador limpo "\n---\n" (senão o primeiro documento sairia
-  # com um "---" solto no começo). Blocos vazios são descartados.
-  namespace_docs          = [for d in split("\n---\n", "\n${local.namespace_raw}") : trimspace(d) if trimspace(d) != ""]
-  database_configmap_docs = [for d in split("\n---\n", "\n${local.database_configmap_raw}") : trimspace(d) if trimspace(d) != ""]
-  database_secret_docs    = [for d in split("\n---\n", "\n${local.database_secret_raw}") : trimspace(d) if trimspace(d) != ""]
-  database_postgres_docs  = [for d in split("\n---\n", "\n${local.database_postgres_raw}") : trimspace(d) if trimspace(d) != ""]
-  database_netpol_docs    = [for d in split("\n---\n", "\n${local.database_netpol_raw}") : trimspace(d) if trimspace(d) != ""]
-  app_secret_docs         = [for d in split("\n---\n", "\n${local.app_secret_raw}") : trimspace(d) if trimspace(d) != ""]
-  app_deployment_docs     = [for d in split("\n---\n", "\n${local.app_deployment_raw}") : trimspace(d) if trimspace(d) != ""]
-  app_netpol_docs         = [for d in split("\n---\n", "\n${local.app_netpol_raw}") : trimspace(d) if trimspace(d) != ""]
-  app_pdb_docs            = [for d in split("\n---\n", "\n${local.app_pdb_raw}") : trimspace(d) if trimspace(d) != ""]
-
-  app_deployment_doc_count = length([
-    for d in split("\n---\n", "\n${file("${local.manifests_path}/app/app-escalavel.yaml")}") : d
-    if trimspace(d) != ""
-  ])
-}
-
-resource "kubectl_manifest" "namespace" {
-  count      = length(local.namespace_docs)
-  yaml_body  = local.namespace_docs[count.index]
   depends_on = [aws_eks_node_group.this]
 }
 
-resource "kubectl_manifest" "database_configmap" {
-  count      = length(local.database_configmap_docs)
-  yaml_body  = local.database_configmap_docs[count.index]
-  depends_on = [kubectl_manifest.namespace]
+# --- Access entries adicionais ---------------------------------------------
+resource "aws_eks_access_entry" "admin" {
+  for_each = toset(var.cluster_admin_role_arns)
+
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = each.value
+  type          = "STANDARD"
 }
 
-resource "kubectl_manifest" "database_secret" {
-  count      = length(local.database_secret_docs)
-  yaml_body  = local.database_secret_docs[count.index]
-  depends_on = [kubectl_manifest.namespace]
-}
+resource "aws_eks_access_policy_association" "admin" {
+  for_each = toset(var.cluster_admin_role_arns)
 
-resource "kubectl_manifest" "app_secret" {
-  count      = length(local.app_secret_docs)
-  yaml_body  = local.app_secret_docs[count.index]
-  depends_on = [kubectl_manifest.namespace]
-}
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = each.value
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
 
-# Deployment do Postgres
-resource "kubectl_manifest" "database_postgres" {
-  count            = length(local.database_postgres_docs)
-  yaml_body        = local.database_postgres_docs[count.index]
-  wait_for_rollout = true
-  depends_on = [
-    kubectl_manifest.database_configmap,
-    kubectl_manifest.database_secret,
-    aws_eks_addon.ebs_csi_driver,
-    kubernetes_storage_class_v1.ebs_gp3,
-  ]
-}
+  access_scope {
+    type = "cluster"
+  }
 
-# Deployment da App
-resource "kubectl_manifest" "app_deployment" {
-  count            = local.app_deployment_doc_count
-  yaml_body        = local.app_deployment_docs[count.index]
-  wait_for_rollout = true
-  depends_on = [
-    kubectl_manifest.database_postgres,
-    kubectl_manifest.app_secret,
-    null_resource.push_image,
-    aws_eks_addon.metrics_server,
-  ]
-}
-
-resource "kubectl_manifest" "database_network_policy" {
-  count      = length(local.database_netpol_docs)
-  yaml_body  = local.database_netpol_docs[count.index]
-  depends_on = [kubectl_manifest.app_deployment]
-}
-
-resource "kubectl_manifest" "app_network_policy" {
-  count      = length(local.app_netpol_docs)
-  yaml_body  = local.app_netpol_docs[count.index]
-  depends_on = [kubectl_manifest.app_deployment]
-}
-
-resource "kubectl_manifest" "app_pod_disruption_budget" {
-  count      = length(local.app_pdb_docs)
-  yaml_body  = local.app_pdb_docs[count.index]
-  depends_on = [kubectl_manifest.app_deployment]
+  depends_on = [aws_eks_access_entry.admin]
 }

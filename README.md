@@ -2,17 +2,24 @@
 
 Infraestrutura do **Tech Challenge Fase 3 (FIAP)**.
 
-O Terraform em `infra/` provisiona um cluster **Amazon EKS** (VPC com subnets
-públicas/privadas, NAT Gateway, node group gerenciado e repositório ECR), publica a imagem
-da aplicação no ECR e aplica os manifestos de `k8s/` no cluster — o deploy inteiro sai de
-um `terraform apply`, sem `kubectl` manual na pipeline.
+O Terraform em `infra/` provisiona um cluster **Amazon EKS** — VPC com subnets
+públicas/privadas, NAT Gateway, addons, managed node group e repositório ECR — mais os
+recursos de cluster compartilhados (namespace e StorageClass default).
+
+**Este repositório não implanta o banco de dados nem a aplicação.** Esses componentes têm
+ciclo de vida próprio e vivem em repositórios separados, que se integram a este lendo os
+outputs do state remoto em S3 — ver [Integração com os outros
+repositórios](#integração-com-os-outros-repositórios).
 
 ```
-infra/     Terraform (VPC, EKS, addons, node group, ECR, deploy dos manifestos)
-k8s/       manifestos aplicados no cluster
-  ├── namespace.yaml
-  ├── database/   Postgres (configmap, secret, StatefulSet+Service, network policy)
-  └── app/        app Spring (secret, Deployment+Service+HPA, network policy, PDB)
+infra/
+├── versions.tf     bloco terraform{} — required_version, required_providers
+├── backend.tf      bloco terraform{} — backend "s3"
+├── providers.tf    providers aws e kubernetes
+├── main.tf         VPC, EKS + addons, node group, ECR, namespace, StorageClass
+├── variables.tf    input variables
+└── outputs.tf      contrato de integração com os outros repositórios
+script-criar-backend.sh   bootstrap manual do bucket S3 do state
 ```
 
 ## Pré-requisitos
@@ -20,8 +27,7 @@ k8s/       manifestos aplicados no cluster
 | Ferramenta | Versão | Para quê |
 | --- | --- | --- |
 | Terraform | >= 1.10.0 | exigido pelo locking nativo do backend S3 (`use_lockfile`) |
-| AWS CLI | v2 | credenciais, `eks get-token`, login no ECR |
-| Docker | recente | build e push da imagem |
+| AWS CLI | v2 | credenciais, `eks get-token` |
 | kubectl | compatível com 1.36 | acesso ao cluster |
 
 Credenciais AWS válidas na cadeia padrão do SDK. Numa conta do **AWS Academy Learner Lab**
@@ -39,30 +45,7 @@ ver `script-criar-backend.sh`. Ele não é criado por este Terraform (problema d
 
 ---
 
-## 1. Build da imagem Docker (plataforma amd64)
-
-**Este repositório não tem Dockerfile** — a imagem é buildada no repositório da aplicação.
-O Terraform apenas faz `docker tag` + `docker push` de uma imagem que já precisa existir
-localmente (`null_resource.push_image`).
-
-Os nós do EKS são `AL2023_x86_64_STANDARD` / `t3.small`, ou seja **linux/amd64**. Num Mac
-Apple Silicon o `docker build` sem `--platform` produz `linux/arm64`, e o containerd do nó
-recusa o pull com `no match for platform in manifest: not found` → `ImagePullBackOff`.
-Por isso a plataforma é obrigatória:
-
-```bash
-# no repositório da aplicação
-docker build --platform linux/amd64 -t tech-challenge-app:local .
-
-# conferir antes de seguir — precisa imprimir amd64
-docker image inspect tech-challenge-app:local --format '{{.Architecture}}/{{.Os}}'
-```
-
-Num runner de CI amd64 o `--platform` é redundante, mas não atrapalha.
-
----
-
-## 2. Provisionar o ambiente com o Terraform
+## 1. Provisionar o ambiente
 
 Os `.tf` ficam em `infra/`, não na raiz. Use `-chdir=infra` em todos os comandos.
 
@@ -75,35 +58,25 @@ terraform -chdir=infra apply tfplan
 ```
 
 Um provisionamento do zero leva **~15–20 min** (control plane EKS + NAT Gateway + node
-group), mais alguns minutos nos `wait_for_rollout` do Postgres e da aplicação.
+group). Ao final, `terraform -chdir=infra output` imprime tudo o que os outros
+repositórios precisam.
 
 ### Variáveis
 
-Os defaults em `infra/variables.tf` são valores de teste. Sobrescreva via `TF_VAR_*`:
-
-```bash
-export TF_VAR_app_image="tech-challenge-app:local"
-export TF_VAR_db_password="..."     # sensitive
-export TF_VAR_jwt_secret="..."      # sensitive, mínimo 32 caracteres
-```
+Os defaults em `infra/variables.tf` cobrem o uso normal; sobrescreva via `TF_VAR_*` quando
+necessário. Não há mais nenhuma variável `sensitive` neste módulo — senha do banco e chave
+JWT saíram junto com o deploy do workload.
 
 Principais defaults: `aws_region=us-east-1`, `cluster_name=tech-challenge`,
 `kubernetes_version=1.36`, `node_instance_type=t3.small`, `node_desired_size=2`,
-`ecr_repository_name=tech-challenge-app`, `lab_role_name=LabRole`.
+`namespace=tech-challenge`, `ecr_repository_name=tech-challenge-app`,
+`lab_role_name=LabRole`, `cluster_admin_role_arns=[]`.
 
-### Republicar a imagem depois de um rebuild
-
-`null_resource.push_image` tem `triggers = { image = var.app_image, repo = ... }`. Rebuildar
-localmente **não muda nenhum dos dois**, então o Terraform considera o recurso atualizado e
-não republica no ECR. Para forçar:
-
-```bash
-terraform -chdir=infra apply -replace=null_resource.push_image
-```
-
-Em CI, o caminho melhor é passar uma tag única por build
-(`TF_VAR_app_image=tech-challenge-app:<git-sha>`): a tag entra no trigger e cada build
-republica sozinho.
+`cluster_admin_role_arns` só é necessária fora do Learner Lab: no lab todos os pipelines
+usam a mesma role de sessão que criou o cluster, que já é admin por
+`bootstrap_cluster_creator_admin_permissions`. Se as pipelines dos repositórios de app e
+banco rodarem com outra IAM role, liste os ARNs dela aqui para receberem uma EKS Access
+Entry de admin.
 
 ### Subir a versão do Kubernetes
 
@@ -142,30 +115,29 @@ terraform -chdir=infra apply \
 > explicitamente no node group — sem ele, um upgrade atualizaria só o control plane e
 > deixaria os nós para trás com o apply terminando limpo.
 
-Durante a rotação dos nós (`max_unavailable = 1`, um nó por vez) a aplicação continua de pé
-graças às 2 réplicas e ao PodDisruptionBudget, mas o `postgres-0` é réplica única sem PDB:
-ele é despejado e reagendado, e a app entra em CrashLoopBackOff até o banco voltar. É
-esperado e se resolve sozinho. Se o `postgres-0` ficar `Pending`, veja se é conflito de AZ
-do volume EBS — `kubectl describe pod postgres-0 -n tech-challenge` procurando
-`volume node affinity conflict`.
+Durante a rotação dos nós (`max_unavailable = 1`, um nó por vez) os workloads são despejados
+e reagendados. Avise os repositórios de app e banco antes de um upgrade.
 
 ### Destruir
 
-O cluster tem custo contínuo (control plane EKS + NAT Gateway + EC2), diferente do Kind
-efêmero que o projeto usava antes. Ao terminar os testes:
+O cluster tem custo contínuo (control plane EKS + NAT Gateway + EC2).
 
 ```bash
 terraform -chdir=infra destroy
 ```
 
+> **Destrua os workloads primeiro.** Rode o `destroy` dos repositórios de banco e de
+> aplicação antes deste. Se o namespace for removido daqui com workloads dentro, o
+> `terraform destroy` deles falhará por não achar mais os recursos, e volumes EBS órfãos
+> podem sobrar sendo cobrados.
+
 ---
 
-## 3. Conectar o kubectl ao cluster EKS
+## 2. Conectar o kubectl ao cluster
 
 ```bash
 aws eks update-kubeconfig --region us-east-1 --name tech-challenge
 kubectl get nodes
-kubectl get pods -n tech-challenge
 ```
 
 O mesmo comando sai pronto como output do Terraform:
@@ -180,129 +152,142 @@ terraform -chdir=infra output configure_kubectl
 
 ---
 
-## 4. Acessar a API (port-forward + token)
+## Integração com os outros repositórios
 
-O `spring-app-service` é **ClusterIP**: não há Ingress nem Load Balancer, então a API não
-tem rota pública. O acesso é por port-forward:
+Os outputs de `infra/outputs.tf` são o **contrato público** deste módulo. Os repositórios
+de banco de dados e de aplicação os leem do state remoto:
+
+```hcl
+data "terraform_remote_state" "infra" {
+  backend = "s3"
+  config = {
+    bucket = "archtechs-infra"
+    key    = "terraform.tfstate"
+    region = "us-east-1"
+  }
+}
+
+locals {
+  infra = data.terraform_remote_state.infra.outputs
+}
+
+provider "kubernetes" {
+  host                   = local.infra.cluster_endpoint
+  cluster_ca_certificate = base64decode(local.infra.cluster_certificate_authority_data)
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args = [
+      "eks", "get-token",
+      "--cluster-name", local.infra.cluster_name,
+      "--region", local.infra.aws_region,
+    ]
+  }
+}
+```
+
+### Regras de convivência
+
+- **`key` distinta por repositório.** Todos usam o mesmo bucket `archtechs-infra`, mas cada
+  root module precisa da própria chave de state — ex.: `database/terraform.tfstate` e
+  `app/terraform.tfstate`. Reusar `terraform.tfstate` sobrescreveria o state da
+  infraestrutura.
+- **Não recrie o que já existe.** O namespace e a StorageClass são criados aqui; use
+  `local.infra.namespace` e `local.infra.storage_class_name` em vez de declarar os seus. Um
+  segundo `create` do mesmo namespace falha por conflito.
+- **Acesso ao cluster.** Se a pipeline consumidora rodar com uma IAM role diferente da que
+  criou o cluster, adicione o ARN dela em `var.cluster_admin_role_arns` **deste** repositório
+  e reaplique — senão o provider `kubernetes` do consumidor recebe `Unauthorized`.
+
+### O que cada output resolve
+
+| Consumidor | Outputs que usa |
+| --- | --- |
+| Providers `kubernetes`/`kubectl`/`helm` | `cluster_endpoint`, `cluster_certificate_authority_data`, `cluster_name`, `aws_region` |
+| Repositório do banco | `namespace`, `storage_class_name`, `vpc_cidr_block` (ipBlock das NetworkPolicies) |
+| Repositório da aplicação | `namespace`, `ecr_repository_url`, `ecr_repository_name`, `ecr_registry_id`, `vpc_cidr_block` |
+| Operação | `configure_kubectl`, `node_group_name`, `cluster_version` |
+
+### Publicando a imagem no ECR
+
+O repositório ECR é provisionado aqui, mas o build e o push são da pipeline da aplicação:
 
 ```bash
-kubectl port-forward -n tech-challenge svc/spring-app-service 8080:80
+REPO=$(terraform -chdir=infra output -raw ecr_repository_url)
+
+docker build --platform linux/amd64 -t "$REPO:$GIT_SHA" .
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin "$REPO"
+docker push "$REPO:$GIT_SHA"
 ```
 
-A API fica em `http://localhost:8080`. Verificação rápida:
+> **`--platform linux/amd64` é obrigatório.** Os nós são `AL2023_x86_64_STANDARD` /
+> `t3.small`. Num Mac Apple Silicon o `docker build` sem `--platform` produz `linux/arm64`,
+> e o containerd do nó recusa o pull com `no match for platform in manifest: not found` →
+> `ImagePullBackOff`. Confira com
+> `docker image inspect <img> --format '{{.Architecture}}/{{.Os}}'`.
 
-```bash
-curl -s http://localhost:8080/actuator/health
-# {"groups":["liveness","readiness"],"status":"UP"}
-```
+### Acoplamento entre banco e aplicação
 
-### Obter um token JWT
-
-Todas as rotas sob `/api`, exceto o login, exigem `Authorization: Bearer <token>` e
-respondem **403** sem ele. O token vem de `POST /api/auth/login`, e o campo da resposta é
-`accessToken`:
-
-```bash
-TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"login":"<usuario>","senha":"<senha>"}' | jq -r .accessToken)
-
-curl -s http://localhost:8080/api/cliente -H "Authorization: Bearer $TOKEN"
-```
-
-A resposta do login traz `accessToken`, `role` e `expiresIn`. Para criar um usuário:
-`POST /api/auth/usuario` com `{"login","senha","role","clienteId"}`.
-
-### Explorar os contratos
-
-```
-http://localhost:8080/swagger-ui/index.html     # Swagger UI
-http://localhost:8080/v3/api-docs               # OpenAPI (JSON)
-```
-
-Recursos disponíveis sob `/api`: `cliente`, `veiculo`, `peca`, `tipoPeca`, `servico`,
-`tipo-servico` e `ordemDeServico` (incluindo as transições de estado da ordem e
-adicionar/remover peças e serviços).
-
-### Expor publicamente
-
-Não está configurado, e exigiria **duas** mudanças juntas: trocar o `spring-app-service`
-para `type: LoadBalancer` **e** ajustar a NetworkPolicy `app-security-policy`, que hoje só
-aceita ingresso de `ipBlock: 10.0.0.0/8` na porta 8080 — sem isso o Load Balancer sobe mas
-a API responde timeout. Um Load Balancer também é cobrado por hora enquanto existir.
+A aplicação lê `SPRING_DATASOURCE_USERNAME`/`_PASSWORD` do ConfigMap `db-config` e do Secret
+`db-credentials`, que pertencem ao banco. Com os dois em repositórios separados, o
+repositório do banco deve ser o dono desses recursos e expor nos próprios outputs o nome do
+Secret/ConfigMap e o host/porta do Service — o repositório da aplicação os consome por um
+segundo `terraform_remote_state` apontando para a `key` do banco.
 
 ---
 
-## 5. Comandos de diagnóstico
+## 3. Diagnóstico do cluster
 
 ```bash
-# Visão geral do namespace
-kubectl get pods,pvc,svc -n tech-challenge -o wide
+# Nós: precisam ficar Ready. STATUS NotReady costuma ser CNI ou kube-proxy.
+kubectl get nodes -o wide
 
-# Acompanhar em tempo real (útil durante o apply)
-kubectl get pods -n tech-challenge -w
+# Componentes de sistema (coredns, aws-node, kube-proxy, ebs-csi-*, metrics-server)
+kubectl get pods -n kube-system
 
-# Por que um pod não sobe — os eventos ficam no fim da saída
-kubectl describe pod -n tech-challenge -l app=spring-app
-
-# Logs do container atual
-kubectl logs -n tech-challenge -l app=spring-app --tail=100
-
-# Logs da encarnação ANTERIOR — indispensável em CrashLoopBackOff,
-# porque o container atual costuma estar em backoff, sem logs novos
-kubectl logs -n tech-challenge <pod> --previous --tail=200
-
-# Eventos do namespace, mais recentes por último
-kubectl get events -n tech-challenge --sort-by=.lastTimestamp
-
-# StorageClasses (a coluna DEFAULT importa: sem default o PVC do Postgres fica Pending)
+# StorageClasses — a coluna DEFAULT importa: sem default, todo PVC fica Pending
 kubectl get storageclass
 
-# HPA e métricas (depende do addon metrics-server)
-kubectl get hpa -n tech-challenge
+# metrics-server respondendo? Se der erro, todo HPA fica em <unknown>
+kubectl top nodes
+
+# Eventos do cluster, mais recentes por último
+kubectl get events -A --sort-by=.lastTimestamp | tail -30
 ```
 
-Conferir a arquitetura da imagem publicada — comando decisivo em `ImagePullBackOff`:
+Do lado da AWS:
 
 ```bash
-aws ecr batch-get-image --repository-name tech-challenge-app --region us-east-1 \
-  --image-ids imageTag=local \
-  --accepted-media-types "application/vnd.oci.image.index.v1+json" \
-    "application/vnd.oci.image.manifest.v1+json" \
-  --query 'images[0].imageManifest' --output text | python3 -m json.tool
-```
-
-Precisa aparecer `"architecture": "amd64"`. A entrada `"unknown"` é o manifesto de
-attestation do BuildKit, não uma plataforma faltando.
-
-```bash
-# Arquitetura dos nós — precisa bater com a da imagem
+# Saúde do node group
 aws eks describe-nodegroup --cluster-name tech-challenge --nodegroup-name default \
-  --region us-east-1 --query 'nodegroup.{amiType:amiType,instanceTypes:instanceTypes}'
+  --region us-east-1 --query 'nodegroup.{status:status,health:health,amiType:amiType,instanceTypes:instanceTypes}'
 
-# Saúde de um addon
+# Saúde de um addon (DEGRADED aqui é o que faz o apply falhar)
 aws eks describe-addon --cluster-name tech-challenge --addon-name aws-ebs-csi-driver \
   --region us-east-1 --query 'addon.{status:status,health:health}'
+
+# Quem tem acesso ao cluster
+aws eks list-access-entries --cluster-name tech-challenge --region us-east-1
 ```
 
-**Referência completa em [`comandos-diagnostico-eks.md`](comandos-diagnostico-eks.md)** —
-inclui um caminho alternativo que consulta a API do cluster via `curl` sem escrever em
-`~/.kube/config` (útil quando o kubeconfig está apontando para um cluster já destruído), e
-o mapa da cadeia de causa dos erros mais comuns.
+### Modo hibernação
 
-### Ler um erro de `wait_for_rollout`
+Para períodos ociosos, escale o node group para zero em vez de destruir o cluster — o
+control plane continua cobrando, mas EC2 e EBS dos nós zeram, e os volumes dos workloads
+sobrevivem:
 
-Um erro do Terraform no `wait_for_rollout` quase nunca é sobre o Terraform — ele é o
-**último elo** de uma cadeia. Exemplo real deste projeto:
+```bash
+# Dormir
+aws eks update-nodegroup-config --region us-east-1 --cluster-name tech-challenge \
+  --nodegroup-name default --scaling-config minSize=0,maxSize=4,desiredSize=0
 
-```
-StorageClass default ausente
-  -> PVC do Postgres fica Pending
-  -> postgres-0 não é escalonado
-  -> postgres-service fica sem endpoints
-  -> Flyway da app recebe "Connection refused" e o container sai com exit 1
-  -> pods em CrashLoopBackOff, Deployment nunca fica Available
-  -> Terraform: "context deadline exceeded"
+# Acordar (~3 min)
+aws eks update-nodegroup-config --region us-east-1 --cluster-name tech-challenge \
+  --nodegroup-name default --scaling-config minSize=0,maxSize=4,desiredSize=2
 ```
 
-Comece pelo pod que não fica `Ready`, leia os logs com `--previous`, e suba até a causa.
+> **Acorde o cluster antes de qualquer `terraform apply`.** Com 0 nós, `coredns`,
+> `aws-ebs-csi-driver` e `metrics-server` ficam `DEGRADED` e o apply falha nesses addons.
+> Note também que `var.node_min_size` tem default 2: um apply depois de hibernar reverte o
+> `minSize=0` acima.

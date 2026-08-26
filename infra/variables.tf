@@ -65,13 +65,13 @@ variable "lab_role_name" {
 variable "node_instance_type" {
   type        = string
   default     = "t3.small"
-  description = "Tipo de instância EC2 usado pelo managed node group do EKS. t3.small (2 vCPU / 2 GB, teto de 11 pods por nó) é o mínimo viável para o workload atual: a app pede 2 réplicas de 250m CPU e 512Mi cada, mais o Postgres e os addons. Em t3.micro (1 GB, teto de 4 pods, já consumidos pelo coredns) os pods ficam Pending."
+  description = "Tipo de instância EC2 usado pelo managed node group do EKS. t3.small (2 vCPU / 2 GB, teto de 11 pods por nó) é o mínimo viável para o workload que os repositórios de app e banco implantam neste cluster: 2 réplicas da aplicação a 250m CPU e 512Mi cada, mais o Postgres e os addons. Em t3.micro (1 GB, teto de 4 pods, já consumidos pelo coredns) os pods ficam Pending."
 }
 
 variable "node_min_size" {
   type        = number
   default     = 2
-  description = "Número mínimo de nós no managed node group (limite inferior do Auto Scaling Group). 2 para espalhar as duas réplicas da app e satisfazer o PodDisruptionBudget."
+  description = "Número mínimo de nós no managed node group (limite inferior do Auto Scaling Group). 2 para espalhar as réplicas da aplicação em nós distintos e satisfazer o PodDisruptionBudget definido no repositório da aplicação."
 }
 
 variable "node_max_size" {
@@ -87,31 +87,27 @@ variable "node_desired_size" {
 }
 
 # ---------------------------------------------------------------------------
-# ECR e imagem da aplicação
+# ECR
 # ---------------------------------------------------------------------------
 
 variable "ecr_repository_name" {
   type        = string
   default     = "tech-challenge-app"
-  description = "Nome do repositório ECR onde a imagem Docker da aplicação é publicada pelo Terraform (null_resource.push_image, em main.tf)."
+  description = "Nome do repositório ECR onde a imagem Docker da aplicação é publicada. Este módulo apenas provisiona o repositório: o build e o push são feitos pela pipeline do repositório da aplicação, que consome o output `ecr_repository_url`."
 }
 
-variable "app_image" {
+# ---------------------------------------------------------------------------
+# Recursos compartilhados no cluster
+# ---------------------------------------------------------------------------
+
+variable "namespace" {
   type        = string
-  default     = "tech-challenge-app:local"
-  description = "Imagem Docker da aplicação buildada no runner (nome:tag local). Na CI é sobrescrita via TF_VAR_app_image com a tag do commit. O Terraform envia essa imagem para o repositório ECR antes do deploy."
+  default     = "tech-challenge"
+  description = "Namespace Kubernetes compartilhado, criado por este módulo (kubernetes_namespace_v1.this) e consumido pelos repositórios de banco de dados e de aplicação através do output `namespace`. Criado aqui porque nenhum dos dois repositórios pode ser dono dele sem conflitar com o outro."
 }
 
-variable "db_password" {
-  type        = string
-  sensitive   = true
-  default     = "local-dev-postgres-password"
-  description = "Senha do Postgres, injetada no Secret db-credentials. Valor de teste; sobrescreva via TF_VAR_db_password em ambientes reais."
-}
-
-variable "jwt_secret" {
-  type        = string
-  sensitive   = true
-  default     = "local-dev-jwt-secret-min-32-characters-0001"
-  description = "Chave HMAC de assinatura dos tokens JWT (mínimo 32 caracteres), injetada no Secret app-secrets. Valor de teste; sobrescreva via TF_VAR_jwt_secret em ambientes reais."
+variable "cluster_admin_role_arns" {
+  type        = list(string)
+  default     = []
+  description = "ARNs de IAM roles que recebem acesso admin ao cluster via EKS Access Entries, além do principal que criou o cluster (já coberto por bootstrap_cluster_creator_admin_permissions). O default vazio basta no AWS Academy Learner Lab, onde todos os pipelines usam a mesma role de sessão; fora do lab, use para dar acesso às roles de CI dos repositórios de app e banco."
 }
