@@ -1,0 +1,45 @@
+# Provisiona o cluster EKS. Leva ~15-20 min num cluster novo e tem custo real.
+# Implanta SOMENTE infraestrutura — banco e aplicação vivem em repositórios próprios.
+name: Terraform Apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform-*.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-infra-state
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.14.0"
+  AWS_REGION: us-east-1
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: prod
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - run: terraform -chdir=infra init -input=false
+      - run: terraform -chdir=infra apply -input=false -no-color -auto-approve
+      - run: terraform -chdir=infra output

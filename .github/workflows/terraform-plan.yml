@@ -1,0 +1,48 @@
+# Valida e planeja as mudanças de infraestrutura, sem aplicar nada.
+name: Terraform Plan
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform-*.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# O backend S3 usa lock nativo e o plan também tranca o state: serializa contra
+# apply e destroy. Cancelar no meio deixaria lock órfão, daí cancel-in-progress false.
+concurrency:
+  group: terraform-infra-state
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.14.0"
+  AWS_REGION: us-east-1
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Credenciais de sessão do AWS Academy Lab: os três valores expiram
+      # junto com o lab e precisam ser recolados nos secrets. Ver README.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - run: terraform -chdir=infra fmt -check -recursive
+      - run: terraform -chdir=infra init -input=false
+      - run: terraform -chdir=infra validate
+      - run: terraform -chdir=infra plan -input=false -no-color

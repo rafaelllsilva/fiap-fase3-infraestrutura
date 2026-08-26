@@ -1,0 +1,53 @@
+# Destrói a infraestrutura. Sempre manual, nunca automático.
+#
+# ORDEM IMPORTA: destrua os workloads (repositórios de banco e de aplicação) ANTES.
+# O namespace tech-challenge é criado por este módulo; removê-lo com workloads
+# dentro quebra o destroy deles e pode deixar volumes EBS órfãos sendo cobrados.
+name: Terraform Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmacao:
+        description: 'Digite "destroy" para confirmar'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-infra-state
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.14.0"
+  AWS_REGION: us-east-1
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    environment: prod
+    timeout-minutes: 45
+    steps:
+      - name: Conferir a confirmação
+        if: inputs.confirmacao != 'destroy'
+        run: |
+          echo "::error::Digite exatamente 'destroy' para prosseguir."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - run: terraform -chdir=infra init -input=false
+      - run: terraform -chdir=infra destroy -input=false -no-color -auto-approve
