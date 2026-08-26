@@ -6,12 +6,12 @@ O Terraform em `infra/` provisiona um cluster **Amazon EKS** — VPC com subnets
 públicas/privadas, NAT Gateway, addons, managed node group e repositório ECR — mais os
 recursos de cluster compartilhados (namespace e StorageClass default).
 
-**Este repositório não implanta o banco de dados nem a aplicação.** Esses componentes têm
-ciclo de vida próprio e vivem em repositórios separados, que se integram a este lendo os
-outputs do state remoto em S3 — ver [Integração com os outros
-repositórios](#integração-com-os-outros-repositórios).
+**Este repositório não implanta o banco de dados nem a aplicação.** Esses componentes vivem
+em repositórios separados, que se integram a este lendo os outputs do state remoto em S3 —
+ver [Integração com os outros repositórios](#integração-com-os-outros-repositórios).
 
 ```
+.github/workflows/  pipeline de plan, apply e destroy
 infra/
 ├── versions.tf     bloco terraform{} — required_version, required_providers
 ├── backend.tf      bloco terraform{} — backend "s3"
@@ -30,18 +30,11 @@ script-criar-backend.sh   bootstrap manual do bucket S3 do state
 | AWS CLI | v2 | credenciais, `eks get-token` |
 | kubectl | compatível com 1.36 | acesso ao cluster |
 
-Credenciais AWS válidas na cadeia padrão do SDK. Numa conta do **AWS Academy Learner Lab**
-a sessão expira junto com o lab — confirme antes de começar:
+Credenciais AWS válidas na cadeia padrão do SDK. Numa conta do **AWS Academy Learner Lab** a
+sessão expira junto com o lab — confirme com `aws sts get-caller-identity` antes de começar.
 
-```bash
-aws sts get-caller-identity
-```
-
-Se retornar `ExpiredToken`, renove a sessão e reexporte `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY` e `AWS_SESSION_TOKEN`.
-
-O backend do state (bucket S3 `archtechs-infra`) é bootstrap manual, feito uma única vez —
-ver `script-criar-backend.sh`. Ele não é criado por este Terraform (problema de ovo-e-galinha).
+O bucket S3 do state (`archtechs-infra`) não é criado por este Terraform: é bootstrap manual,
+feito uma única vez com `script-criar-backend.sh`.
 
 ---
 
@@ -50,57 +43,42 @@ ver `script-criar-backend.sh`. Ele não é criado por este Terraform (problema d
 Os `.tf` ficam em `infra/`, não na raiz. Use `-chdir=infra` em todos os comandos.
 
 ```bash
-terraform -chdir=infra init       # backend S3 já hardcoded em infra/backend.tf
+terraform -chdir=infra init
 terraform -chdir=infra fmt -recursive
 terraform -chdir=infra validate
 terraform -chdir=infra plan -out=tfplan
 terraform -chdir=infra apply tfplan
 ```
 
-Um provisionamento do zero leva **~15–20 min** (control plane EKS + NAT Gateway + node
-group). Ao final, `terraform -chdir=infra output` imprime tudo o que os outros
-repositórios precisam.
+Um provisionamento do zero leva **~15–20 min**. Ao final, `terraform -chdir=infra output`
+imprime tudo o que os outros repositórios precisam.
 
 ### Variáveis
 
 Os defaults em `infra/variables.tf` cobrem o uso normal; sobrescreva via `TF_VAR_*` quando
-necessário. Não há mais nenhuma variável `sensitive` neste módulo — senha do banco e chave
-JWT saíram junto com o deploy do workload.
-
-Principais defaults: `aws_region=us-east-1`, `cluster_name=tech-challenge`,
+necessário. Principais: `aws_region=us-east-1`, `cluster_name=tech-challenge`,
 `kubernetes_version=1.36`, `node_instance_type=t3.small`, `node_desired_size=2`,
 `namespace=tech-challenge`, `ecr_repository_name=tech-challenge-app`,
 `lab_role_name=LabRole`, `cluster_admin_role_arns=[]`.
 
-`cluster_admin_role_arns` só é necessária fora do Learner Lab: no lab todos os pipelines
-usam a mesma role de sessão que criou o cluster, que já é admin por
-`bootstrap_cluster_creator_admin_permissions`. Se as pipelines dos repositórios de app e
-banco rodarem com outra IAM role, liste os ARNs dela aqui para receberem uma EKS Access
-Entry de admin.
+`cluster_admin_role_arns` só é necessária se as pipelines dos outros repositórios rodarem com
+uma IAM role diferente da que criou o cluster.
 
 ### Subir a versão do Kubernetes
 
-`var.kubernetes_version` alimenta **o cluster e o node group**, então mudar a variável sobe
-os dois no mesmo apply. Os addons são o passo à parte.
-
-> **Um minor por vez.** O EKS não aceita pular versões no upgrade: da 1.34 para a 1.36 são
-> dois ciclos completos, com a 1.35 no meio. A restrição vale só para cluster existente — um
-> cluster criado do zero pode nascer direto em qualquer versão suportada. Desde julho de
-> 2026 há rollback para o minor anterior dentro de 7 dias, mas conte com ele como saída de
-> emergência, não como plano.
+`var.kubernetes_version` alimenta o cluster e o node group, então mudar a variável sobe os
+dois no mesmo apply. Os addons são um passo à parte: como `addon_version` não é declarado, só
+a recriação faz cada um pegar a versão nova.
 
 ```bash
-# 1. conferir o que a AWS oferece e o status de suporte de cada versão
-aws eks describe-cluster-versions --region us-east-1 \
-  --query 'clusterVersions[].{v:clusterVersion,status:status,fimPadrao:endOfStandardSupportDate}' \
-  --output table
+# versões disponíveis e status de suporte
+aws eks describe-cluster-versions --region us-east-1
 
-# 2. control plane + nós
-terraform -chdir=infra plan -out=tfplan   # espere update in-place, nunca replace do cluster
+# control plane + nós
+terraform -chdir=infra plan -out=tfplan
 terraform -chdir=infra apply tfplan
 
-# 3. addons: como addon_version não é declarado (a AWS escolhe o default da
-#    versão do cluster), só a recriação faz cada um pegar a versão nova
+# addons
 terraform -chdir=infra apply \
   -replace=aws_eks_addon.kube_proxy \
   -replace=aws_eks_addon.vpc_cni \
@@ -109,27 +87,17 @@ terraform -chdir=infra apply \
   -replace=aws_eks_addon.metrics_server
 ```
 
-> **Cuidado com o upgrade pela metade.** `version` no node group e `addon_version` nos
-> addons são `Optional + Computed`: sem valor no config, o Terraform lê o que existe na AWS
-> e não propõe diferença. Foi por isso que `version = var.kubernetes_version` foi declarado
-> explicitamente no node group — sem ele, um upgrade atualizaria só o control plane e
-> deixaria os nós para trás com o apply terminando limpo.
-
-Durante a rotação dos nós (`max_unavailable = 1`, um nó por vez) os workloads são despejados
-e reagendados. Avise os repositórios de app e banco antes de um upgrade.
+O EKS não aceita pular minors num cluster existente — da 1.34 para a 1.36 são dois ciclos.
 
 ### Destruir
-
-O cluster tem custo contínuo (control plane EKS + NAT Gateway + EC2).
 
 ```bash
 terraform -chdir=infra destroy
 ```
 
 > **Destrua os workloads primeiro.** Rode o `destroy` dos repositórios de banco e de
-> aplicação antes deste. Se o namespace for removido daqui com workloads dentro, o
-> `terraform destroy` deles falhará por não achar mais os recursos, e volumes EBS órfãos
-> podem sobrar sendo cobrados.
+> aplicação antes deste. O namespace é criado aqui; removê-lo com workloads dentro quebra o
+> destroy deles e pode deixar volumes EBS órfãos sendo cobrados.
 
 ---
 
@@ -140,22 +108,31 @@ aws eks update-kubeconfig --region us-east-1 --name tech-challenge
 kubectl get nodes
 ```
 
-O mesmo comando sai pronto como output do Terraform:
+O mesmo comando sai pronto no output `configure_kubectl`.
 
-```bash
-terraform -chdir=infra output configure_kubectl
-```
+---
 
-> **O endpoint muda toda vez que o cluster é recriado.** Um kubeconfig antigo falha com
-> `dial tcp: lookup <hash>.us-east-1.eks.amazonaws.com: no such host` — não é rede nem
-> permissão, é só endpoint velho. Rode o `update-kubeconfig` de novo.
+## 3. Pipeline no GitHub Actions
+
+| Workflow | Dispara em | O que faz |
+| --- | --- | --- |
+| `terraform-plan.yml` | pull request para a `main`, ou manual | `fmt -check`, `init`, `validate`, `plan` |
+| `terraform-apply.yml` | push na `main` que toque em `infra/**`, ou manual | `init`, `apply -auto-approve`, `output` |
+| `terraform-destroy.yml` | só manual | exige a palavra `destroy` digitada, depois `destroy -auto-approve` |
+
+Configure três secrets em **Settings → Secrets and variables → Actions**:
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e `AWS_SESSION_TOKEN`.
+
+> São credenciais de sessão do Learner Lab: **expiram junto com o lab** e precisam ser
+> recoladas a cada sessão nova. Sem o `AWS_SESSION_TOKEN` a autenticação falha com
+> `InvalidClientTokenId`, que parece chave errada e não é.
 
 ---
 
 ## Integração com os outros repositórios
 
-Os outputs de `infra/outputs.tf` são o **contrato público** deste módulo. Os repositórios
-de banco de dados e de aplicação os leem do state remoto:
+Os outputs de `infra/outputs.tf` são o **contrato público** deste módulo. Os repositórios de
+banco de dados e de aplicação os leem do state remoto:
 
 ```hcl
 data "terraform_remote_state" "infra" {
@@ -189,29 +166,18 @@ provider "kubernetes" {
 
 ### Regras de convivência
 
-- **`key` distinta por repositório.** Todos usam o mesmo bucket `archtechs-infra`, mas cada
-  root module precisa da própria chave de state — ex.: `database/terraform.tfstate` e
-  `app/terraform.tfstate`. Reusar `terraform.tfstate` sobrescreveria o state da
-  infraestrutura.
+- **`key` distinta por repositório.** Todos usam o bucket `archtechs-infra`, mas cada root
+  module precisa da própria chave — ex.: `database/terraform.tfstate` e `app/terraform.tfstate`.
 - **Não recrie o que já existe.** O namespace e a StorageClass são criados aqui; use
-  `local.infra.namespace` e `local.infra.storage_class_name` em vez de declarar os seus. Um
-  segundo `create` do mesmo namespace falha por conflito.
-- **Acesso ao cluster.** Se a pipeline consumidora rodar com uma IAM role diferente da que
-  criou o cluster, adicione o ARN dela em `var.cluster_admin_role_arns` **deste** repositório
-  e reaplique — senão o provider `kubernetes` do consumidor recebe `Unauthorized`.
-
-### O que cada output resolve
-
-| Consumidor | Outputs que usa |
-| --- | --- |
-| Providers `kubernetes`/`kubectl`/`helm` | `cluster_endpoint`, `cluster_certificate_authority_data`, `cluster_name`, `aws_region` |
-| Repositório do banco | `namespace`, `storage_class_name`, `vpc_cidr_block` (ipBlock das NetworkPolicies) |
-| Repositório da aplicação | `namespace`, `ecr_repository_url`, `ecr_repository_name`, `ecr_registry_id`, `vpc_cidr_block` |
-| Operação | `configure_kubectl`, `node_group_name`, `cluster_version` |
+  `local.infra.namespace` e `local.infra.storage_class_name`.
+- **Acesso ao cluster.** Pipeline consumidora com IAM role diferente precisa do ARN dela em
+  `var.cluster_admin_role_arns` **deste** repositório, senão recebe `Unauthorized`.
 
 ### Publicando a imagem no ECR
 
-O repositório ECR é provisionado aqui, mas o build e o push são da pipeline da aplicação:
+O repositório ECR é provisionado aqui, mas o build e o push são da pipeline da aplicação. O
+`--platform linux/amd64` é obrigatório: os nós são `AL2023_x86_64_STANDARD`, e uma imagem
+arm64 dá `ImagePullBackOff`.
 
 ```bash
 REPO=$(terraform -chdir=infra output -raw ecr_repository_url)
@@ -221,61 +187,26 @@ aws ecr get-login-password --region us-east-1 | docker login --username AWS --pa
 docker push "$REPO:$GIT_SHA"
 ```
 
-> **`--platform linux/amd64` é obrigatório.** Os nós são `AL2023_x86_64_STANDARD` /
-> `t3.small`. Num Mac Apple Silicon o `docker build` sem `--platform` produz `linux/arm64`,
-> e o containerd do nó recusa o pull com `no match for platform in manifest: not found` →
-> `ImagePullBackOff`. Confira com
-> `docker image inspect <img> --format '{{.Architecture}}/{{.Os}}'`.
-
-### Acoplamento entre banco e aplicação
-
-A aplicação lê `SPRING_DATASOURCE_USERNAME`/`_PASSWORD` do ConfigMap `db-config` e do Secret
-`db-credentials`, que pertencem ao banco. Com os dois em repositórios separados, o
-repositório do banco deve ser o dono desses recursos e expor nos próprios outputs o nome do
-Secret/ConfigMap e o host/porta do Service — o repositório da aplicação os consome por um
-segundo `terraform_remote_state` apontando para a `key` do banco.
-
 ---
 
-## 3. Diagnóstico do cluster
+## Diagnóstico do cluster
 
 ```bash
-# Nós: precisam ficar Ready. STATUS NotReady costuma ser CNI ou kube-proxy.
 kubectl get nodes -o wide
-
-# Componentes de sistema (coredns, aws-node, kube-proxy, ebs-csi-*, metrics-server)
 kubectl get pods -n kube-system
-
-# StorageClasses — a coluna DEFAULT importa: sem default, todo PVC fica Pending
 kubectl get storageclass
-
-# metrics-server respondendo? Se der erro, todo HPA fica em <unknown>
 kubectl top nodes
-
-# Eventos do cluster, mais recentes por último
 kubectl get events -A --sort-by=.lastTimestamp | tail -30
-```
 
-Do lado da AWS:
-
-```bash
-# Saúde do node group
-aws eks describe-nodegroup --cluster-name tech-challenge --nodegroup-name default \
-  --region us-east-1 --query 'nodegroup.{status:status,health:health,amiType:amiType,instanceTypes:instanceTypes}'
-
-# Saúde de um addon (DEGRADED aqui é o que faz o apply falhar)
-aws eks describe-addon --cluster-name tech-challenge --addon-name aws-ebs-csi-driver \
-  --region us-east-1 --query 'addon.{status:status,health:health}'
-
-# Quem tem acesso ao cluster
+aws eks describe-nodegroup --cluster-name tech-challenge --nodegroup-name default --region us-east-1
+aws eks describe-addon --cluster-name tech-challenge --addon-name aws-ebs-csi-driver --region us-east-1
 aws eks list-access-entries --cluster-name tech-challenge --region us-east-1
 ```
 
 ### Modo hibernação
 
-Para períodos ociosos, escale o node group para zero em vez de destruir o cluster — o
-control plane continua cobrando, mas EC2 e EBS dos nós zeram, e os volumes dos workloads
-sobrevivem:
+Para períodos ociosos, escale o node group para zero em vez de destruir o cluster: o control
+plane continua cobrando, mas EC2 e EBS dos nós zeram e os volumes dos workloads sobrevivem.
 
 ```bash
 # Dormir
@@ -288,6 +219,4 @@ aws eks update-nodegroup-config --region us-east-1 --cluster-name tech-challenge
 ```
 
 > **Acorde o cluster antes de qualquer `terraform apply`.** Com 0 nós, `coredns`,
-> `aws-ebs-csi-driver` e `metrics-server` ficam `DEGRADED` e o apply falha nesses addons.
-> Note também que `var.node_min_size` tem default 2: um apply depois de hibernar reverte o
-> `minSize=0` acima.
+> `aws-ebs-csi-driver` e `metrics-server` ficam `DEGRADED` e o apply falha.
