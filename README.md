@@ -120,12 +120,22 @@ O mesmo comando sai pronto no output `configure_kubectl`.
 | `terraform-apply.yml` | push na `main` que toque em `infra/**`, ou manual | `init`, `apply -auto-approve`, `output` |
 | `terraform-destroy.yml` | só manual | exige a palavra `destroy` digitada, depois `destroy -auto-approve` |
 
-Configure três secrets em **Settings → Secrets and variables → Actions**:
+Os três secrets da AWS ficam no **environment `prod`** (Settings → Environments → prod):
 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e `AWS_SESSION_TOKEN`.
+
+```bash
+gh secret set AWS_ACCESS_KEY_ID     --env prod --body "$AWS_ACCESS_KEY_ID"
+gh secret set AWS_SECRET_ACCESS_KEY --env prod --body "$AWS_SECRET_ACCESS_KEY"
+gh secret set AWS_SESSION_TOKEN     --env prod --body "$AWS_SESSION_TOKEN"
+```
 
 > São credenciais de sessão do Learner Lab: **expiram junto com o lab** e precisam ser
 > recoladas a cada sessão nova. Sem o `AWS_SESSION_TOKEN` a autenticação falha com
 > `InvalidClientTokenId`, que parece chave errada e não é.
+
+> **Todo job que usa esses secrets precisa declarar `environment: prod`.** Secrets de
+> environment não chegam a jobs que não o referenciam: `${{ secrets.AWS_* }}` vira string
+> vazia e a action falha com `Could not load credentials from any providers`.
 
 ---
 

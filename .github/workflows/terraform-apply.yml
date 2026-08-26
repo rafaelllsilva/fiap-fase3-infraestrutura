@@ -24,6 +24,7 @@ env:
 jobs:
   apply:
     runs-on: ubuntu-latest
+    environment: prod
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
