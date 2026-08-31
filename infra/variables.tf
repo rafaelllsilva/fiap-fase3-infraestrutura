@@ -64,14 +64,14 @@ variable "lab_role_name" {
 
 variable "node_instance_type" {
   type        = string
-  default     = "t3.small"
-  description = "Tipo de instância EC2 usado pelo managed node group do EKS. t3.small (2 vCPU / 2 GB, teto de 11 pods por nó) é o mínimo viável para o workload que os repositórios de app e banco implantam neste cluster: 2 réplicas da aplicação a 250m CPU e 512Mi cada, mais o Postgres e os addons. Em t3.micro (1 GB, teto de 4 pods, já consumidos pelo coredns) os pods ficam Pending."
+  default     = "t3.medium"
+  description = "Tipo de instância EC2 usado pelo managed node group do EKS. t3.medium oferece 2 vCPU e 4 GiB de memória por nó, capacidade adequada para a aplicação, PostgreSQL, addons do EKS e observabilidade com New Relic."
 }
 
 variable "node_min_size" {
   type        = number
-  default     = 2
-  description = "Número mínimo de nós no managed node group (limite inferior do Auto Scaling Group). 2 para espalhar as réplicas da aplicação em nós distintos e satisfazer o PodDisruptionBudget definido no repositório da aplicação."
+  default     = 3
+  description = "Número mínimo de nós no managed node group (limite inferior do Auto Scaling Group). 2 para espalhar as duas réplicas da app e satisfazer o PodDisruptionBudget."
 }
 
 variable "node_max_size" {
@@ -82,7 +82,7 @@ variable "node_max_size" {
 
 variable "node_desired_size" {
   type        = number
-  default     = 2
+  default     = 3
   description = "Número desejado de nós no managed node group ao provisionar o cluster."
 }
 
