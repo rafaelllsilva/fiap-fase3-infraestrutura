@@ -57,7 +57,7 @@ imprime tudo o que os outros repositórios precisam.
 
 Os defaults em `infra/variables.tf` cobrem o uso normal; sobrescreva via `TF_VAR_*` quando
 necessário. Principais: `aws_region=us-east-1`, `cluster_name=tech-challenge`,
-`kubernetes_version=1.36`, `node_instance_type=t3.small`, `node_desired_size=2`,
+`kubernetes_version=1.36`, `node_instance_type=t3.medium`, `node_desired_size=3`,
 `namespace=tech-challenge`, `ecr_repository_name=tech-challenge-app`,
 `lab_role_name=LabRole`, `cluster_admin_role_arns=[]`.
 
@@ -109,6 +109,25 @@ kubectl get nodes
 ```
 
 O mesmo comando sai pronto no output `configure_kubectl`.
+
+### Acessar a aplicação da máquina local
+
+O `kubectl port-forward` abre um túnel entre uma porta da sua máquina e um Service (ou pod) do
+cluster — é o jeito de falar com a API sem depender do API Gateway.
+
+Os nomes vêm do repositório da aplicação, não deste; confira o que está publicado no namespace:
+
+```bash
+kubectl get svc,deploy -n tech-challenge
+```
+
+```bash
+
+# Deployment da API: porta 8080 do container -> 8080 na máquina local
+kubectl port-forward -n tech-challenge deployment/tech-challenge-app 8080:8080
+```
+
+Com o port forward aberto, a API fica acessível na rota `http://localhost:8080`.
 
 ---
 
@@ -207,26 +226,9 @@ kubectl get pods -n kube-system
 kubectl get storageclass
 kubectl top nodes
 kubectl get events -A --sort-by=.lastTimestamp | tail -30
+kubectl port-forward -n tech-challenge service/spring-app-service 8080:80  # ver "Acessar a aplicação da máquina local"
 
 aws eks describe-nodegroup --cluster-name tech-challenge --nodegroup-name default --region us-east-1
 aws eks describe-addon --cluster-name tech-challenge --addon-name aws-ebs-csi-driver --region us-east-1
 aws eks list-access-entries --cluster-name tech-challenge --region us-east-1
 ```
-
-### Modo hibernação
-
-Para períodos ociosos, escale o node group para zero em vez de destruir o cluster: o control
-plane continua cobrando, mas EC2 e EBS dos nós zeram e os volumes dos workloads sobrevivem.
-
-```bash
-# Dormir
-aws eks update-nodegroup-config --region us-east-1 --cluster-name tech-challenge \
-  --nodegroup-name default --scaling-config minSize=0,maxSize=4,desiredSize=0
-
-# Acordar (~3 min)
-aws eks update-nodegroup-config --region us-east-1 --cluster-name tech-challenge \
-  --nodegroup-name default --scaling-config minSize=0,maxSize=4,desiredSize=2
-```
-
-> **Acorde o cluster antes de qualquer `terraform apply`.** Com 0 nós, `coredns`,
-> `aws-ebs-csi-driver` e `metrics-server` ficam `DEGRADED` e o apply falha.
