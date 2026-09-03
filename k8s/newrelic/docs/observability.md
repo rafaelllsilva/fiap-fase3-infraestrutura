@@ -48,21 +48,11 @@ New Relic: Kubernetes, APM, Logs, Traces, Dashboards e Alerts
 
 ## Instalação da integração Kubernetes
 
-Pré-requisito: criar manualmente o Secret `newrelic-license` no namespace `newrelic`, usando uma chave **Ingest - License** válida. O valor da chave não deve ser versionado.
+A instalação e atualização oficial do New Relic é feita manualmente pela workflow GitHub **Deploy New Relic** (`.github/workflows/deploy-newrelic.yml`). Ela usa o Environment `prod`, configura o acesso ao EKS canônico `tech-challenge`, cria ou atualiza o namespace e o Secret, instala o bundle e aplica o auto-attach Java. Não executar esses passos a partir de máquinas locais.
 
-```bash
-helm repo add newrelic https://helm-charts.newrelic.com
-helm repo update
+Pré-requisito: cadastrar uma chave **Ingest - License** válida no GitHub Environment `prod` como o secret `NEW_RELIC_LICENSE_KEY`. A chave nunca deve ser versionada em `values.yaml`, manifests, variáveis Terraform, state, documentação ou logs. A workflow cria o Secret Kubernetes `newrelic-license` no namespace `newrelic` sem imprimir seu valor.
 
-helm upgrade --install newrelic-bundle newrelic/nri-bundle \
-  --namespace newrelic \
-  --create-namespace \
-  --values k8s/newrelic/values.yaml \
-  --wait \
-  --timeout 10m
-
-kubectl apply -f k8s/newrelic/instrumentation.yaml
-```
+A workflow falha antes da instalação caso não exista node `Ready`; escale ou recupere o node group e execute-a novamente. Ela não reinicia a aplicação: após a instalação do auto-attach, faça um novo deploy da aplicação pelo fluxo do repositório da aplicação para que os novos pods recebam o agente Java.
 
 ### Seleção para APM
 
@@ -109,7 +99,14 @@ kubectl get pod <pod-spring> -n tech-challenge \
   -o jsonpath='{.spec.initContainers[*].name}'
 ```
 
-O resultado deve conter um init container com prefixo `nri-java--`, por exemplo `nri-java--spring-app-container`.
+Após o novo deploy da aplicação, valide especificamente o init container esperado:
+
+```bash
+kubectl get pod <pod-spring> -n tech-challenge \
+  -o jsonpath='{.spec.initContainers[*].name}' | tr ' ' '\n' | grep -x 'nri-java--spring-app-container'
+```
+
+O comando deve retornar `nri-java--spring-app-container`. Se não retornar, confirme os labels `app=spring-app` no pod e o namespace `tech-challenge`.
 
 ### Gerar uma transação de teste
 
@@ -217,7 +214,7 @@ LIMIT 20
 
 ## Telemetria de negocio pendente
 
-Os paineis tecnicos nao substituem as metricas de negocio solicitadas. A aplicacao deve emitir logs JSON e/ou eventos customizados quando:
+Os paineis tecnicos nao substituem as metricas de negocio solicitadas. Os logs JSON estruturados da aplicacao sao coletados do stdout do container pelo New Relic Logging; nao adicionar SDK New Relic a aplicacao apenas para logs. A aplicacao deve emitir logs JSON e/ou eventos customizados quando:
 
 1. uma ordem de servico e criada;
 2. uma ordem muda de status;
@@ -226,7 +223,7 @@ Os paineis tecnicos nao substituem as metricas de negocio solicitadas. A aplicac
 Campos minimos recomendados:
 
 ```text
-eventType
+serviceOrderEventType
 orderId
 fromStatus
 toStatus
@@ -235,12 +232,12 @@ timestamp
 traceId
 ```
 
-Eventos sugeridos:
+Valores esperados para `serviceOrderEventType`:
 
 ```text
-ServiceOrderCreated
-ServiceOrderStatusChanged
-ServiceOrderProcessingFailed
+service_order_created
+service_order_status_changed
+service_order_processing_failed
 ```
 
 Depois da implementacao, acrescentar ao dashboard:
@@ -253,7 +250,7 @@ Depois da implementacao, acrescentar ao dashboard:
 
 Depois que os eventos de negocio forem implementados, criar:
 
-1. alerta para qualquer `ServiceOrderProcessingFailed` em cinco minutos;
+1. alerta para qualquer `serviceOrderEventType = 'service_order_processing_failed'` em cinco minutos;
 2. alerta de taxa de erro da API acima do limite definido pelo time, por exemplo 5% por cinco minutos;
 3. alerta de indisponibilidade do endpoint publico depois do API Gateway.
 
