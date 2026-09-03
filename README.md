@@ -10,6 +10,99 @@ recursos de cluster compartilhados (namespace e StorageClass default).
 em repositórios separados, que se integram a este lendo os outputs do state remoto em S3 —
 ver [Integração com os outros repositórios](#integração-com-os-outros-repositórios).
 
+## Índice
+
+- [Tecnologias utilizadas](#tecnologias-utilizadas)
+- [Diagrama de arquitetura](#diagrama-de-arquitetura)
+- [Estrutura do repositório](#estrutura-do-repositório)
+- [Pré-requisitos](#pré-requisitos)
+- [1. Provisionar o ambiente](#1-provisionar-o-ambiente)
+- [2. Conectar o kubectl ao cluster](#2-conectar-o-kubectl-ao-cluster)
+- [3. Pipeline no GitHub Actions](#3-pipeline-no-github-actions)
+- [Integração com os outros repositórios](#integração-com-os-outros-repositórios)
+- [Diagnóstico do cluster](#diagnóstico-do-cluster)
+
+---
+
+## Tecnologias utilizadas
+
+| Categoria | Item |
+| --- | --- |
+| IaC | Terraform `>= 1.10.0` (locking nativo do backend S3) |
+| Provider | `hashicorp/aws ~> 6.61` |
+| Provider | `hashicorp/kubernetes ~> 3.2` |
+| Módulo | `terraform-aws-modules/vpc/aws ~> 6.7` |
+| Orquestração | Amazon EKS (control plane + addons `vpc-cni`, `kube-proxy`, `coredns`, `aws-ebs-csi-driver`, `metrics-server` + managed node group) |
+| Rede | Amazon VPC (subnets públicas/privadas, Internet Gateway, NAT Gateway) |
+| Registro de imagens | Amazon ECR |
+| Estado remoto | Amazon S3 (backend do Terraform, lock nativo) |
+| IAM | Role `LabRole` pré-existente do AWS Academy Learner Lab (reaproveitada, nenhuma role nova é criada) |
+| CI/CD | GitHub Actions (`terraform-plan.yml`, `terraform-apply.yml`, `terraform-destroy.yml`) |
+| Ambiente | AWS Academy Learner Lab (credenciais de sessão temporárias) |
+
+## Diagrama de arquitetura
+
+Componentes provisionados por **este** repositório e como se relacionam com o restante do
+projeto (pipeline que os cria, e os outros repositórios que os consomem):
+
+```mermaid
+flowchart TB
+  classDef externo fill:#E9ECF1,stroke:#5A6577,stroke-width:1.5px,color:#131A24
+  classDef rede    fill:#E3F1EF,stroke:#1B6E68,stroke-width:1.5px,color:#131A24
+  classDef k8s     fill:#E9EFF9,stroke:#2B5FA8,stroke-width:1.5px,color:#131A24
+  classDef dados   fill:#F0EAF6,stroke:#6A4A85,stroke-width:1.5px,color:#131A24
+
+  ci["<b>GitHub Actions</b><br/><i>terraform-plan / apply / destroy</i>"]
+  consumidores["<b>Outros repositórios</b><br/><i>banco, aplicação, autenticação</i><br/>lêem os outputs via terraform_remote_state"]
+
+  subgraph aws["CONTA AWS — AWS Academy Learner Lab · us-east-1"]
+    direction TB
+
+    state["<b>Amazon S3 — archtechs-infra</b><br/><i>backend do state · infra-cluster/terraform.tfstate</i><br/>lock nativo (use_lockfile)"]
+    ecr["<b>Amazon ECR</b><br/><i>tech-challenge-app · scan on push</i>"]
+
+    subgraph vpc["VPC — 10.0.0.0/16 · module terraform-aws-modules/vpc/aws"]
+      direction TB
+      net["<b>Subnets públicas e privadas</b><br/><i>2 AZs · Internet Gateway · NAT Gateway</i>"]
+    end
+
+    subgraph eks["AMAZON EKS — cluster tech-challenge · Kubernetes 1.36"]
+      direction TB
+      cp["<b>Control plane gerenciado</b><br/><i>API server · etcd · scheduler</i>"]
+      addons["<b>Add-ons do cluster</b><br/>vpc-cni · kube-proxy · coredns<br/>aws-ebs-csi-driver · metrics-server"]
+      ng["<b>Managed Node Group default</b><br/><i>t3.medium · ON_DEMAND · AL2023</i>"]
+      ns["<b>Namespace tech-challenge</b>"]
+      sc["<b>StorageClass gp3</b><br/><i>default · ebs.csi.aws.com</i>"]
+    end
+  end
+
+  ci -->|"init / plan / apply"| state
+  ci -->|"provisiona"| vpc
+  ci -->|"provisiona"| eks
+  ci -->|"provisiona"| ecr
+
+  net -->|"subnets"| ng
+  cp  -->|"gerencia"| ng
+  addons -->|"roda nos nós"| ng
+
+  ns -.->|"consumido por"| consumidores
+  sc -.->|"consumido por"| consumidores
+  ecr -.->|"docker pull"| ng
+  ecr -.->|"docker push (pipeline da app)"| consumidores
+  state -.->|"outputs via remote_state"| consumidores
+
+  class ci,consumidores externo
+  class net rede
+  class cp,addons,ng,ns,sc k8s
+  class state,ecr dados
+```
+
+Para a arquitetura combinada dos quatro repositórios do projeto (fluxo completo de uma
+requisição, legenda de cores e tabela de responsabilidades), ver
+[`docs/diagrama-componentes-c4.md`](docs/diagrama-componentes-c4.md).
+
+## Estrutura do repositório
+
 ```
 .github/workflows/  pipeline de plan, apply e destroy
 infra/
@@ -168,7 +261,7 @@ data "terraform_remote_state" "infra" {
   backend = "s3"
   config = {
     bucket = "archtechs-infra"
-    key    = "terraform.tfstate"
+    key    = "infra-cluster/terraform.tfstate"
     region = "us-east-1"
   }
 }
