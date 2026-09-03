@@ -1,0 +1,78 @@
+name: Deploy New Relic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: tech-challenge
+  NEW_RELIC_NAMESPACE: newrelic
+  HELM_VERSION: v3.16.4
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    timeout-minutes: 30
+    env:
+      NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configurar acesso ao EKS
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
+
+      - name: Validar nodes Ready
+        run: |
+          if ! kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}' | awk '$2 == "True" { ready++ } END { exit ready == 0 }'; then
+            echo "::error::Nenhum node Ready foi encontrado no EKS. Escale ou recupere o node group antes de instalar o New Relic."
+            exit 1
+          fi
+
+      - name: Instalar Helm
+        uses: azure/setup-helm@v4.2.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Criar namespace e Secret do New Relic
+        run: |
+          if [ -z "$NEW_RELIC_LICENSE_KEY" ]; then
+            echo "::error::O secret NEW_RELIC_LICENSE_KEY não está configurado no Environment prod."
+            exit 1
+          fi
+
+          kubectl create namespace "$NEW_RELIC_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n "$NEW_RELIC_NAMESPACE" create secret generic newrelic-license \
+            --from-literal=licenseKey="$NEW_RELIC_LICENSE_KEY" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Instalar ou atualizar o New Relic bundle
+        run: |
+          helm repo add newrelic https://helm-charts.newrelic.com --force-update
+          helm repo update
+          helm upgrade --install newrelic-bundle newrelic/nri-bundle \
+            --namespace "$NEW_RELIC_NAMESPACE" \
+            --create-namespace \
+            --values k8s/newrelic/values.yaml \
+            --wait \
+            --timeout 10m
+
+      - name: Aplicar auto-attach Java
+        run: kubectl apply -f k8s/newrelic/instrumentation.yaml
+
+      - name: Validar instalação
+        run: |
+          helm status newrelic-bundle -n "$NEW_RELIC_NAMESPACE"
+          kubectl get pods -n "$NEW_RELIC_NAMESPACE"
+          kubectl get instrumentation -n "$NEW_RELIC_NAMESPACE"
+          kubectl wait --for=condition=Ready pod --all -n "$NEW_RELIC_NAMESPACE" --timeout=10m
