@@ -1,8 +1,8 @@
 # Diagrama de Componentes — C4 Model (Nível 3)
 
 Visão macro da infraestrutura do **Tech Challenge Fase 3**: a borda serverless que autentica
-e roteia as chamadas, o cluster Kubernetes gerenciado onde a aplicação e o banco executam, e
-o armazenamento persistente por trás deles.
+e roteia as chamadas, o cluster Kubernetes gerenciado onde a aplicação executa, e o banco
+relacional gerenciado por trás dela.
 
 Conforme orientado na live, este diagrama fica no **nível mais macro possível** e é voltado à
 infraestrutura — os recursos que estão na nuvem AWS. Ficam deliberadamente de fora o
@@ -15,7 +15,9 @@ quatro repositórios.
 | Região | `us-east-1` |
 | VPC | `10.0.0.0/16` · 2 AZs |
 | Cluster | `tech-challenge` · Kubernetes `1.36` |
+| Node group | 3–4 × `t3.medium` (2 vCPU · 4 GiB) · desejado 3 |
 | Namespace | `tech-challenge` |
+| Banco de dados | Amazon RDS for PostgreSQL |
 | Registro de imagens | ECR `tech-challenge-app` |
 
 ## Diagrama
@@ -30,7 +32,7 @@ flowchart TB
 
   pessoa["<b>Consumidor da API</b><br/><i>Pessoa</i><br/>Abre e acompanha ordens de serviço"]
   postman["<b>Postman</b><br/><i>Sistema externo · cliente REST</i><br/>Dispara as requisições e guarda o JWT"]
-  newrelic["<b>New Relic</b><br/><i>Sistema externo · observabilidade</i><br/>Métricas, logs estruturados e traces"]
+  newrelic["<b>New Relic</b><br/><i>Sistema externo · observabilidade</i><br/>Recebe transações, traces e logs do agente APM"]
 
   subgraph aws["CONTA AWS — AWS Academy Learner Lab · us-east-1"]
     direction TB
@@ -44,15 +46,16 @@ flowchart TB
 
       nlb["<b>Network Load Balancer</b><br/><i>Service type=LoadBalancer</i><br/>Expõe a API para o API Gateway"]
       rota["<b>Roteamento de saída</b><br/><i>Internet Gateway + NAT Gateway</i><br/>Saída dos nós nas subnets privadas"]
+      rds["<b>Amazon RDS for PostgreSQL</b><br/><i>Instância gerenciada · porta 5432 · DB subnet group</i><br/>Security group libera 5432 apenas para os nós do cluster"]
 
       subgraph eks["AMAZON EKS — cluster tech-challenge · Kubernetes 1.36"]
         direction TB
 
         cp["<b>Control plane gerenciado</b><br/><i>API server · etcd · scheduler</i>"]
         addons["<b>Add-ons do cluster</b><br/>vpc-cni · kube-proxy · coredns<br/>aws-ebs-csi-driver · metrics-server"]
-        sc["<b>StorageClass gp3</b><br/><i>ebs.csi.aws.com · default</i><br/>WaitForFirstConsumer, criptografada"]
+        sc["<b>StorageClass gp3</b><br/><i>ebs.csi.aws.com · default</i><br/>Disponível para qualquer PersistentVolumeClaim"]
 
-        subgraph ng["MANAGED NODE GROUP default — 2–4 × t3.small · AL2023 · subnets privadas"]
+        subgraph ng["MANAGED NODE GROUP default — 3–4 × t3.medium · AL2023 · subnets privadas"]
           direction TB
 
           subgraph ns["NAMESPACE tech-challenge"]
@@ -61,10 +64,7 @@ flowchart TB
             svcapi["<b>Service da API</b><br/><i>LoadBalancer → 8080</i>"]
             hpa["<b>HorizontalPodAutoscaler</b><br/><i>min 2 · max 10 · CPU e memória</i>"]
             pdb["<b>PodDisruptionBudget</b><br/><i>minAvailable: 1</i>"]
-            app["<b>Deployment da API de Ordens de Serviço</b><br/><i>2 réplicas · imagem do ECR · probes</i><br/>Valida o JWT e executa as migrations Flyway"]
-            svcpg["<b>Service do PostgreSQL</b><br/><i>ClusterIP · 5432</i>"]
-            pg["<b>StatefulSet PostgreSQL</b><br/><i>1 réplica · banco relacional</i>"]
-            pvc["<b>PersistentVolumeClaim</b><br/><i>StorageClass gp3 · volume EBS</i>"]
+            app["<b>Deployment da API de Ordens de Serviço</b><br/><i>2 réplicas · imagem do ECR · probes</i><br/>Valida o JWT e executa as migrations Flyway<br/>Agente do New Relic embarcado na JVM"]
           end
         end
       end
@@ -79,20 +79,17 @@ flowchart TB
   svcapi   -->|"balanceia entre as réplicas"| app
   hpa      -->|"escala 2 → 10"| app
   pdb      -->|"minAvailable: 1"| app
-  app      -->|"JDBC :5432"| svcpg
-  svcpg    --> pg
-  pg       -->|"monta"| pvc
-  sc       -.->|"provisiona"| pvc
+  app      -->|"JDBC :5432"| rds
   addons   -.->|"fornece métricas"| hpa
   ecr      -.->|"docker pull"| ng
   rota     -.->|"saída para internet"| ng
-  eks      -.->|"métricas · logs · traces"| newrelic
+  app      -.->|"agente APM · traces e logs"| newrelic
 
   class pessoa,postman,newrelic externo
   class apigw,lambda borda
   class nlb,rota rede
   class cp,addons,svcapi,hpa,pdb,app k8s
-  class ecr,sc,svcpg,pg,pvc dados
+  class ecr,sc,rds dados
 ```
 
 ### Legenda de cores
@@ -103,7 +100,7 @@ flowchart TB
 | Ocre | Borda serverless gerenciada | API Gateway, Lambda Authorizer |
 | Teal | Rede | VPC, NLB, Internet/NAT Gateway |
 | Azul | Kubernetes | Control plane, add-ons, Deployment, HPA, PDB |
-| Violeta | Dados e armazenamento | ECR, StorageClass, PostgreSQL, PVC |
+| Violeta | Dados e armazenamento | ECR, StorageClass, RDS PostgreSQL |
 
 Linhas contínuas representam o caminho de uma requisição; linhas tracejadas representam
 relações de suporte (provisionamento, telemetria, pull de imagem).
@@ -118,12 +115,12 @@ relações de suporte (provisionamento, telemetria, pull de imagem).
    encaminhada ao balanceador criado pelo Service da aplicação.
 4. **NLB → Service → Deployment.** O tráfego entra no cluster e é distribuído entre as
    réplicas da API, que validam o JWT recebido.
-5. **Deployment → Service do PostgreSQL.** A aplicação consulta e grava a ordem de serviço
-   via JDBC na porta 5432.
-6. **StatefulSet → PVC → EBS.** O banco persiste os dados no volume EBS gp3 provisionado
-   pelo CSI driver.
-7. **HPA → Deployment.** Em paralelo, o autoscaler lê as métricas do `metrics-server` e
+5. **Deployment → Amazon RDS.** A aplicação consulta e grava a ordem de serviço via JDBC na
+   porta 5432. O security group do RDS só aceita conexões vindas dos nós do cluster.
+6. **HPA → Deployment.** Em paralelo, o autoscaler lê as métricas do `metrics-server` e
    ajusta as réplicas entre 2 e 10; o PodDisruptionBudget mantém ao menos uma no ar.
+7. **Agente → New Relic.** Durante todo o percurso, o agente embarcado na JVM envia a
+   transação, seus traces e os logs correlacionados para o New Relic.
 
 ## Quem provisiona cada componente
 
@@ -139,8 +136,8 @@ combinado; cada repositório é dono apenas da sua fatia.
 | Managed node group | Infraestrutura (este) | `aws_eks_node_group` com launch template próprio |
 | Namespace e StorageClass | Infraestrutura (este) | Compartilhados; criados aqui para os outros dois repositórios não disputarem a posse |
 | Amazon ECR | Infraestrutura (este) | O repositório é provisionado aqui; o build e o push da imagem são da pipeline da aplicação |
-| StatefulSet, Service e PVC do banco | Banco de dados | Consome o namespace e a StorageClass pelo state remoto |
-| Deployment, Service, HPA e PDB | Aplicação | Inclui ConfigMap, Secret e as migrations Flyway |
+| Instância RDS PostgreSQL | Banco de dados | Consome a VPC, as subnets e o security group dos nós pelo state remoto |
+| Deployment, Service, HPA e PDB | Aplicação | Inclui ConfigMap, Secret, as migrations Flyway e o agente do New Relic na imagem |
 
 ## Fora do escopo
 
