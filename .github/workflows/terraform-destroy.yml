@@ -1,8 +1,4 @@
 # Destrói a infraestrutura. Sempre manual, nunca automático.
-#
-# ORDEM IMPORTA: destrua os workloads (repositórios de banco e de aplicação) ANTES.
-# O namespace tech-challenge é criado por este módulo; removê-lo com workloads
-# dentro quebra o destroy deles e pode deixar volumes EBS órfãos sendo cobrados.
 name: Terraform Destroy
 
 on:
@@ -42,6 +38,7 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      # Credenciais de sessão do AWS Academy Lab
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -49,5 +46,11 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - run: terraform -chdir=infra init -input=false
-      - run: terraform -chdir=infra destroy -input=false -no-color -auto-approve
+      - name: Criar bucket S3 do backend
+        run: sh script-criar-backend.sh
+
+      - name: Executar init
+        run: terraform -chdir=infra init -input=false
+
+      - name: Executar destroy
+        run: terraform -chdir=infra destroy -input=false -no-color -auto-approve

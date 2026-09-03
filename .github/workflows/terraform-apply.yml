@@ -1,5 +1,4 @@
-# Provisiona o cluster EKS. Leva ~15-20 min num cluster novo e tem custo real.
-# Implanta SOMENTE infraestrutura — banco e aplicação vivem em repositórios próprios.
+# Provisiona o cluster EKS
 name: Terraform Apply
 
 on:
@@ -33,6 +32,7 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      # Credenciais de sessão do AWS Academy Lab
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -40,6 +40,14 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - run: terraform -chdir=infra init -input=false
-      - run: terraform -chdir=infra apply -input=false -no-color -auto-approve
-      - run: terraform -chdir=infra output
+      - name: Criar bucket S3 do backend
+        run: sh script-criar-backend.sh
+
+      - name: Executar init
+        run: terraform -chdir=infra init -input=false
+
+      - name: Executar apply
+        run: terraform -chdir=infra apply -input=false -no-color -auto-approve
+
+      - name: Exibir outputs
+        run: terraform -chdir=infra output
