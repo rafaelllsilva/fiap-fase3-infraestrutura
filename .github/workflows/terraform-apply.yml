@@ -51,3 +51,15 @@ jobs:
 
       - name: Exibir outputs
         run: terraform -chdir=infra output
+
+      # Exibir outputs específicos para integração com outras pipelines
+      - name: "Outputs de integração: VPC, subnets privadas e security group"
+        run: |
+          echo "vpc_id:"
+          terraform -chdir=infra output vpc_id
+          echo
+          echo "private_subnet_ids:"
+          terraform -chdir=infra output private_subnet_ids
+          echo
+          echo "cluster_security_group_id:"
+          terraform -chdir=infra output cluster_security_group_id
