@@ -5,12 +5,14 @@ metadata:
   name: newrelic-instrumentation
   namespace: newrelic
 spec:
+  # The operator copies this Secret to selected workload namespaces.
+  licenseKeySecret: newrelic-key-secret
   agent:
     # Values supported: dotnet, java, nodejs, python, ruby, php
     language: java
 
     # Values supported: newrelic-java-init:latest, newrelic-dotnet-init:latest, newrelic-node-init:latest, newrelic-python-init:latest, newrelic-ruby-init:latest, newrelic-php-init:latest, newrelic-php-init:musl
-    image: newrelic/newrelic-java-init:latest
+    image: newrelic/newrelic-java-init:9.4.0@sha256:f98d055a40a57a1fe3c21cb536a738c30862b5b204acb4afd8886e434dc30818
     env:
       - name: NEW_RELIC_APP_NAME
         value: tech-challenge-app
@@ -28,3 +30,10 @@ spec:
       - key: "app"
         operator: "In"
         values: ["tech-challenge-app"]
+
+  containerSelector:
+    nameSelector:
+      matchExpressions:
+        - key: "container"
+          operator: "In"
+          values: ["tech-challenge-app"]
