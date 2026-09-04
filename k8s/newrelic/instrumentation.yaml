@@ -30,4 +30,4 @@ spec:
     matchExpressions:
       - key: "app"
         operator: "In"
-        values: ["spring-app"]
+        values: ["tech-challenge-app"]
