@@ -33,12 +33,29 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      # Credenciais de sessão do AWS Academy Lab
+      # Credenciais de sessão do AWS Academy Lab (secret único, 3 chaves)
+      - name: Extrair credenciais AWS
+        id: aws_creds
+        env:
+          AWS_CREDENTIALS: ${{ secrets.AWS_CREDENTIALS }}
+        run: |
+          access_key_id=$(grep '^aws_access_key_id=' <<< "$AWS_CREDENTIALS" | cut -d= -f2-)
+          secret_access_key=$(grep '^aws_secret_access_key=' <<< "$AWS_CREDENTIALS" | cut -d= -f2-)
+          session_token=$(grep '^aws_session_token=' <<< "$AWS_CREDENTIALS" | cut -d= -f2-)
+          echo "::add-mask::$access_key_id"
+          echo "::add-mask::$secret_access_key"
+          echo "::add-mask::$session_token"
+          {
+            echo "access_key_id=$access_key_id"
+            echo "secret_access_key=$secret_access_key"
+            echo "session_token=$session_token"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-access-key-id: ${{ steps.aws_creds.outputs.access_key_id }}
+          aws-secret-access-key: ${{ steps.aws_creds.outputs.secret_access_key }}
+          aws-session-token: ${{ steps.aws_creds.outputs.session_token }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Criar bucket S3 do backend
