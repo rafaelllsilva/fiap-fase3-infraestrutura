@@ -95,25 +95,25 @@ kubectl top pods -n tech-challenge
 
 ```bash
 kubectl get pods -n tech-challenge --show-labels
-kubectl get pod <pod-spring> -n tech-challenge \
+kubectl get pod <pod-app> -n tech-challenge \
   -o jsonpath='{.spec.initContainers[*].name}'
 ```
 
 Após o novo deploy da aplicação, valide especificamente o init container esperado:
 
 ```bash
-kubectl get pod <pod-spring> -n tech-challenge \
-  -o jsonpath='{.spec.initContainers[*].name}' | tr ' ' '\n' | grep -x 'nri-java--spring-app-container'
+kubectl get pod <pod-app> -n tech-challenge \
+  -o jsonpath='{.spec.initContainers[*].name}' | tr ' ' '\n' | grep -x 'nri-java--tech-challenge-app'
 ```
 
-O comando deve retornar `nri-java--spring-app-container`. Se não retornar, confirme os labels `app=spring-app` no pod e o namespace `tech-challenge`.
+O comando deve retornar `nri-java--tech-challenge-app`. Se não retornar, confirme os labels `app=tech-challenge-app` no pod e o namespace `tech-challenge`.
 
 ### Gerar uma transação de teste
 
 Em um terminal:
 
 ```bash
-kubectl port-forward -n tech-challenge service/spring-app-service 8080:80
+kubectl port-forward -n tech-challenge service/tech-challenge-app-service 8080:80
 ```
 
 Em outro terminal:
@@ -125,7 +125,7 @@ for i in {1..50}; do
 done
 ```
 
-Apos alguns minutos, a transacao deve aparecer em **APM & Services** no servico `spring-app-deployment`.
+Apos alguns minutos, a transacao deve aparecer em **APM & Services** no servico `tech-challenge-app`.
 
 ## Dashboard
 
@@ -148,7 +148,7 @@ Nome: `Tech Challenge - Observability`.
 ```sql
 FROM Transaction
 SELECT average(duration) * 1000 AS 'Average response time (ms)'
-WHERE appName = 'spring-app-deployment' AND transactionType = 'Web'
+WHERE appName = 'tech-challenge-app' AND transactionType = 'Web'
 TIMESERIES
 ```
 
@@ -157,7 +157,7 @@ TIMESERIES
 ```sql
 FROM Transaction
 SELECT rate(count(*), 1 minute) AS 'Requests per minute'
-WHERE appName = 'spring-app-deployment' AND transactionType = 'Web'
+WHERE appName = 'tech-challenge-app' AND transactionType = 'Web'
 TIMESERIES
 ```
 
@@ -166,7 +166,7 @@ TIMESERIES
 ```sql
 FROM Transaction
 SELECT percentage(count(*), WHERE error IS true) AS 'Error rate (%)'
-WHERE appName = 'spring-app-deployment' AND transactionType = 'Web'
+WHERE appName = 'tech-challenge-app' AND transactionType = 'Web'
 TIMESERIES
 ```
 
@@ -177,7 +177,7 @@ FROM K8sContainerSample
 SELECT average(cpuUsedCores) AS 'CPU cores'
 WHERE clusterName = 'tech-challenge'
   AND namespaceName = 'tech-challenge'
-  AND containerName = 'spring-app-container'
+  AND containerName = 'tech-challenge-app'
 FACET podName TIMESERIES
 ```
 
@@ -188,7 +188,7 @@ FROM K8sContainerSample
 SELECT average(memoryWorkingSetBytes) / 1024 / 1024 AS 'Memory (MiB)'
 WHERE clusterName = 'tech-challenge'
   AND namespaceName = 'tech-challenge'
-  AND containerName = 'spring-app-container'
+  AND containerName = 'tech-challenge-app'
 FACET podName TIMESERIES
 ```
 
@@ -199,7 +199,7 @@ FROM K8sDeploymentSample
 SELECT latest(podsDesired) AS 'Desired', latest(podsAvailable) AS 'Available'
 WHERE clusterName = 'tech-challenge'
   AND namespaceName = 'tech-challenge'
-  AND deploymentName = 'spring-app-deployment'
+  AND deploymentName = 'tech-challenge-app'
 TIMESERIES
 ```
 

@@ -12,11 +12,8 @@ spec:
     # Values supported: newrelic-java-init:latest, newrelic-dotnet-init:latest, newrelic-node-init:latest, newrelic-python-init:latest, newrelic-ruby-init:latest, newrelic-php-init:latest, newrelic-php-init:musl
     image: newrelic/newrelic-java-init:latest
     env:
-    # Example overriding the appName configuration
-    # - name: NEW_RELIC_APP_NAME
-    #   valueFrom:
-    #     fieldRef:
-    #       fieldPath: metadata.labels['app.kubernetes.io/name']
+      - name: NEW_RELIC_APP_NAME
+        value: tech-challenge-app
 
   # Select a namespace with a specific name by using "kubernetes.io/metadata.name" label
   namespaceLabelSelector:
