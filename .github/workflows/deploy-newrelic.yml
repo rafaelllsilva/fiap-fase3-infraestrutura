@@ -11,6 +11,7 @@ env:
   EKS_CLUSTER_NAME: tech-challenge
   NEW_RELIC_NAMESPACE: newrelic
   HELM_VERSION: v3.16.4
+  NRI_BUNDLE_VERSION: 8.0.22
 
 jobs:
   deploy:
@@ -73,6 +74,9 @@ jobs:
           kubectl -n "$NEW_RELIC_NAMESPACE" create secret generic newrelic-license \
             --from-literal=licenseKey="$NEW_RELIC_LICENSE_KEY" \
             --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n "$NEW_RELIC_NAMESPACE" create secret generic newrelic-key-secret \
+            --from-literal=new_relic_license_key="$NEW_RELIC_LICENSE_KEY" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Instalar ou atualizar o New Relic bundle
         run: |
@@ -81,6 +85,7 @@ jobs:
           helm upgrade --install newrelic-bundle newrelic/nri-bundle \
             --namespace "$NEW_RELIC_NAMESPACE" \
             --create-namespace \
+            --version "$NRI_BUNDLE_VERSION" \
             --values k8s/newrelic/values.yaml \
             --wait \
             --timeout 10m
@@ -106,7 +111,9 @@ jobs:
           exit 1
 
       - name: Aplicar auto-attach Java
-        run: kubectl apply -f k8s/newrelic/instrumentation.yaml
+        run: |
+          kubectl apply -f k8s/newrelic/instrumentation.yaml
+          kubectl delete secret newrelic-key-secret -n tech-challenge --ignore-not-found
 
       - name: Validar instalação
         run: |

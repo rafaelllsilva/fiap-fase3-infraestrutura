@@ -50,9 +50,9 @@ New Relic: Kubernetes, APM, Logs, Traces, Dashboards e Alerts
 
 A instalação e atualização oficial do New Relic é feita manualmente pela workflow GitHub **Deploy New Relic** (`.github/workflows/deploy-newrelic.yml`). Ela usa o Environment `prod`, configura o acesso ao EKS canônico `tech-challenge`, cria ou atualiza o namespace e o Secret, instala o bundle e aplica o auto-attach Java. Não executar esses passos a partir de máquinas locais.
 
-Pré-requisito: cadastrar uma chave **Ingest - License** válida no GitHub Environment `prod` como o secret `NEW_RELIC_LICENSE_KEY`. A chave nunca deve ser versionada em `values.yaml`, manifests, variáveis Terraform, state, documentação ou logs. A workflow cria o Secret Kubernetes `newrelic-license` no namespace `newrelic` sem imprimir seu valor.
+Pré-requisito: cadastrar uma chave **Ingest - License** válida no GitHub Environment `prod` como o secret `NEW_RELIC_LICENSE_KEY`. A chave nunca deve ser versionada em `values.yaml`, manifests, variáveis Terraform, state, documentação ou logs. A workflow cria os Secrets Kubernetes do bundle e do K8s Agents Operator no namespace `newrelic` sem imprimir seu valor.
 
-A workflow falha antes da instalação caso não exista node `Ready`; escale ou recupere o node group e execute-a novamente. Ela não reinicia a aplicação: após a instalação do auto-attach, faça um novo deploy da aplicação pelo fluxo do repositório da aplicação para que os novos pods recebam o agente Java.
+A workflow falha antes da instalação caso não exista node `Ready`; escale ou recupere o node group e execute-a novamente. Ela não reinicia a aplicação: após a instalação do auto-attach, faça um novo deploy da aplicação pelo fluxo do repositório da aplicação para que os novos pods recebam o agente Java. Antes desse deploy, a workflow remove a cópia da chave do namespace `tech-challenge`, para que o operador a replique novamente a partir da chave atual.
 
 ### Seleção para APM
 
