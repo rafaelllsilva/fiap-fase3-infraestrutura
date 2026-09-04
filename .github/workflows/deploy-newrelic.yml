@@ -67,6 +67,26 @@ jobs:
             --wait \
             --timeout 10m
 
+      - name: Aguardar webhook do K8s Agents Operator
+        run: |
+          operator_deployment="newrelic-bundle-k8s-agents-operator"
+          webhook_service="${operator_deployment}-webhook-service"
+
+          kubectl rollout status deployment/"$operator_deployment" \
+            -n "$NEW_RELIC_NAMESPACE" \
+            --timeout=5m
+
+          for attempt in {1..30}; do
+            if [ -n "$(kubectl get endpoints "$webhook_service" -n "$NEW_RELIC_NAMESPACE" -o jsonpath='{.subsets[*].addresses[*].ip}')" ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "::error::O webhook do K8s Agents Operator não recebeu endpoint Ready após 150 segundos."
+          kubectl get deployment,pods,endpoints -n "$NEW_RELIC_NAMESPACE"
+          exit 1
+
       - name: Aplicar auto-attach Java
         run: kubectl apply -f k8s/newrelic/instrumentation.yaml
 
