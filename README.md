@@ -208,6 +208,13 @@ As pipelines dependem de 2 secrets:
   - `AWS_ACCESS_KEY_ID`
   - `AWS_SECRET_ACCESS_KEY`
   - `AWS_SESSION_TOKEN`
+  
+  Segue um exemplo do conteúdo deste secret que deve ser seguido:
+  ```bash
+  aws_access_key_id=...
+  aws_secret_access_key=...
+  aws_session_token=...
+  ```
 - `NEW_RELIC_LICENSE_KEY`: chavem de licença do New Relic, ferramenta de APM utilizada no projeto.
 
 > Nota: As credenciais AWS expiram a cada 4 horas, portanto novas chaves devem ser criadas e atualizadas no secret sempre que for rodar a pipeline. Para fazer isso, basta reuniciar o lab do AWS Academy.
