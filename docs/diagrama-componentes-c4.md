@@ -25,7 +25,7 @@ flowchart TB
     subgraph vpc["VPC"]
       direction TB
 
-      nlb["<b>Network Load Balancer</b><br/><i>[Service type=LoadBalancer]</i><br/>Expõe a API para o API Gateway"]
+      nlb["<b>Load Balancer</b><br/><i>[Network Load Balancer]</i><br/>Expõe a API para o API Gateway"]
       rota["<b>Roteamento de saída</b><br/><i>[Internet Gateway + NAT Gateway]</i><br/>Saída dos nós nas subnets privadas"]
       rds["<b>Amazon RDS</b><br/><i>[PostgreSQL - porta 5432]</i><br/>Banco de dados PostgreSQL da API de OS"]
       lambda["<b>AWS Lambda</b><br/><i>[Java]</i><br/>Autentica por CPF e emite o token JWT"]
