@@ -59,7 +59,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Criar bucket S3 do backend
-        run: sh script-criar-backend.sh
+        run: sh infra/script-criar-backend.sh
 
       - name: Formatar manifestos
         run: terraform -chdir=infra fmt -check -recursive
