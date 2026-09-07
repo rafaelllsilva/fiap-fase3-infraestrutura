@@ -1,46 +1,62 @@
 # fiap-fase3-infraestrutura
 
-Infraestrutura do **Tech Challenge Fase 3 (FIAP)**.
+## Introdução
 
-O Terraform em `infra/` provisiona um cluster **Amazon EKS** — VPC com subnets
-públicas/privadas, NAT Gateway, addons, managed node group e repositório ECR — mais os
-recursos de cluster compartilhados (namespace e StorageClass default).
-
-**Este repositório não implanta o banco de dados nem a aplicação.** Esses componentes vivem
-em repositórios separados, que se integram a este lendo os outputs do state remoto em S3 —
-ver [Integração com os outros repositórios](#integração-com-os-outros-repositórios).
+Infraestrutura do Tech Challenge Fase 3. O Terraform em `infra/` provisiona um
+cluster Kubernetes no Amazon EKS, VPC com subnets públicas/privadas, NAT Gateway, addons, managed
+node group e repositório ECR, além dos recursos de cluster compartilhados como namespace e
+StorageClass.
 
 ## Índice
 
-- [Tecnologias utilizadas](#tecnologias-utilizadas)
-- [Diagrama de arquitetura](#diagrama-de-arquitetura)
+- [Propósito](#propósito)
+- [Tecnologias](#tecnologias)
 - [Estrutura do repositório](#estrutura-do-repositório)
+- [Arquitetura deste Repositório](#arquitetura-deste-repositório)
 - [Pré-requisitos](#pré-requisitos)
-- [1. Provisionar o ambiente](#1-provisionar-o-ambiente)
-- [2. Conectar o kubectl ao cluster](#2-conectar-o-kubectl-ao-cluster)
-- [3. Pipeline no GitHub Actions](#3-pipeline-no-github-actions)
-- [Integração com os outros repositórios](#integração-com-os-outros-repositórios)
+- [Provisionar o ambiente](#provisionar-o-ambiente)
+- [Regras de integração](#regras-de-integração)
+- [Publicando a imagem no ECR](#publicando-a-imagem-no-ecr)
 - [Diagnóstico do cluster](#diagnóstico-do-cluster)
+- [Conectar o kubectl ao cluster](#conectar-o-kubectl-ao-cluster)
+- [Pipeline no GitHub Actions](#pipeline-no-github-actions)
+- [Integração com os outros repositórios](#integração-com-os-outros-repositórios)
 
 ---
 
-## Tecnologias utilizadas
+## Propósito
 
-| Categoria | Item |
-| --- | --- |
-| IaC | Terraform `>= 1.10.0` (locking nativo do backend S3) |
-| Provider | `hashicorp/aws ~> 6.61` |
-| Provider | `hashicorp/kubernetes ~> 3.2` |
-| Módulo | `terraform-aws-modules/vpc/aws ~> 6.7` |
-| Orquestração | Amazon EKS (control plane + addons `vpc-cni`, `kube-proxy`, `coredns`, `aws-ebs-csi-driver`, `metrics-server` + managed node group) |
-| Rede | Amazon VPC (subnets públicas/privadas, Internet Gateway, NAT Gateway) |
-| Registro de imagens | Amazon ECR |
-| Estado remoto | Amazon S3 (backend do Terraform, lock nativo) |
-| IAM | Role `LabRole` pré-existente do AWS Academy Learner Lab (reaproveitada, nenhuma role nova é criada) |
-| CI/CD | GitHub Actions (`terraform-plan.yml`, `terraform-apply.yml`, `terraform-destroy.yml`) |
-| Ambiente | AWS Academy Learner Lab (credenciais de sessão temporárias) |
+- Provisionar o cluster Kubernetes completo no Amazon EKS (control plane, addons de rede e
+  storage, managed node group) e a VPC em que ele roda via Terraform.
+- Recursos compartilhados de cluster: cria o namespace `tech-challenge`, a StorageClass
+  `gp3` default e os addons que os workloads dependem (`aws-ebs-csi-driver` para
+  PersistentVolumeClaims, `metrics-server` para HPA).
+- Registro de imagens: provisiona o repositório Amazon ECR usado pela pipeline da aplicação para publicar a imagem Docker.
 
-## Diagrama de arquitetura
+## Tecnologias
+- Kubernetes 1.36
+- Terraform 1.10.0
+- Componentes AWS:
+  - EKS (cluster Kubernetes)
+  - VPC (subnets públicas/privadas, Internet Gateway, NAT Gateway)
+  - ECR (repositório de imagem Docker)
+  - S3 (backend do Terraform)
+
+## Estrutura do repositório
+
+```
+.github/workflows/  pipeline de plan, apply e destroy
+infra/
+├── versions.tf     bloco terraform{} — required_version, required_providers
+├── backend.tf      bloco terraform{} — backend "s3"
+├── providers.tf    providers aws e kubernetes
+├── main.tf         VPC, EKS + addons, node group, ECR, namespace, StorageClass
+├── variables.tf    input variables
+└── outputs.tf      contrato de integração com os outros repositórios
+script-criar-backend.sh   bootstrap idempotente do bucket S3 do state (CI + uso manual)
+```
+
+## Arquitetura deste Repositório
 
 Componentes provisionados por **este** repositório e como se relacionam com o restante do
 projeto (pipeline que os cria, e os outros repositórios que os consomem):
@@ -53,7 +69,6 @@ flowchart TB
   classDef dados   fill:#F0EAF6,stroke:#6A4A85,stroke-width:1.5px,color:#131A24
 
   ci["<b>GitHub Actions</b><br/><i>terraform-plan / apply / destroy</i>"]
-  consumidores["<b>Outros repositórios</b><br/><i>banco, aplicação, autenticação</i><br/>lêem os outputs via terraform_remote_state"]
 
   subgraph aws["CONTA AWS — AWS Academy Learner Lab · us-east-1"]
     direction TB
@@ -84,119 +99,74 @@ flowchart TB
   net -->|"subnets"| ng
   cp  -->|"gerencia"| ng
   addons -->|"roda nos nós"| ng
-
-  ns -.->|"consumido por"| consumidores
-  sc -.->|"consumido por"| consumidores
   ecr -.->|"docker pull"| ng
-  ecr -.->|"docker push (pipeline da app)"| consumidores
-  state -.->|"outputs via remote_state"| consumidores
-
   class ci,consumidores externo
   class net rede
   class cp,addons,ng,ns,sc k8s
   class state,ecr dados
 ```
 
-Para a arquitetura combinada dos quatro repositórios do projeto (fluxo completo de uma
-requisição, legenda de cores e tabela de responsabilidades), ver
-[`docs/diagrama-componentes-c4.md`](docs/diagrama-componentes-c4.md).
-
-## Estrutura do repositório
-
-```
-.github/workflows/  pipeline de plan, apply e destroy
-infra/
-├── versions.tf     bloco terraform{} — required_version, required_providers
-├── backend.tf      bloco terraform{} — backend "s3"
-├── providers.tf    providers aws e kubernetes
-├── main.tf         VPC, EKS + addons, node group, ECR, namespace, StorageClass
-├── variables.tf    input variables
-└── outputs.tf      contrato de integração com os outros repositórios
-script-criar-backend.sh   bootstrap idempotente do bucket S3 do state (CI + uso manual)
-```
-
 ## Pré-requisitos
-
-| Ferramenta | Versão | Para quê |
-| --- | --- | --- |
-| Terraform | >= 1.10.0 | exigido pelo locking nativo do backend S3 (`use_lockfile`) |
-| AWS CLI | v2 | credenciais, `eks get-token` |
-| kubectl | compatível com 1.36 | acesso ao cluster |
-
-Credenciais AWS válidas na cadeia padrão do SDK. Numa conta do **AWS Academy Learner Lab** a
-sessão expira junto com o lab — confirme com `aws sts get-caller-identity` antes de começar.
-
-O bucket S3 do state (`archtechs-infra`) não é criado por este Terraform. As pipelines de CI
-já garantem que ele exista, rodando `script-criar-backend.sh` (idempotente) antes de cada
-`terraform init`. Para rodar localmente antes de qualquer CI, execute o mesmo script uma vez:
-`sh script-criar-backend.sh`.
+- Terraform: >= 1.10.0
+- kubectl: compatível com 1.36
+- AWS CLI: v2
 
 ---
 
-## 1. Provisionar o ambiente
+## Provisionar o ambiente
 
-Os `.tf` ficam em `infra/`, não na raiz. Use `-chdir=infra` em todos os comandos.
-
-```bash
-terraform -chdir=infra init
-terraform -chdir=infra fmt -recursive
-terraform -chdir=infra validate
-terraform -chdir=infra plan -out=tfplan
-terraform -chdir=infra apply tfplan
-```
-
-Um provisionamento do zero leva **~15–20 min**. Ao final, `terraform -chdir=infra output`
-imprime tudo o que os outros repositórios precisam.
-
-### Variáveis
-
-Os defaults em `infra/variables.tf` cobrem o uso normal; sobrescreva via `TF_VAR_*` quando
-necessário. Principais: `aws_region=us-east-1`, `cluster_name=tech-challenge`,
-`kubernetes_version=1.36`, `node_instance_type=t3.medium`, `node_desired_size=3`,
-`namespace=tech-challenge`, `ecr_repository_name=tech-challenge-app`,
-`lab_role_name=LabRole`, `cluster_admin_role_arns=[]`.
-
-`cluster_admin_role_arns` só é necessária se as pipelines dos outros repositórios rodarem com
-uma IAM role diferente da que criou o cluster.
-
-### Subir a versão do Kubernetes
-
-`var.kubernetes_version` alimenta o cluster e o node group, então mudar a variável sobe os
-dois no mesmo apply. Os addons são um passo à parte: como `addon_version` não é declarado, só
-a recriação faz cada um pegar a versão nova.
+Os `.tf` ficam em `infra/`:
 
 ```bash
-# versões disponíveis e status de suporte
-aws eks describe-cluster-versions --region us-east-1
-
-# control plane + nós
-terraform -chdir=infra plan -out=tfplan
-terraform -chdir=infra apply tfplan
-
-# addons
-terraform -chdir=infra apply \
-  -replace=aws_eks_addon.kube_proxy \
-  -replace=aws_eks_addon.vpc_cni \
-  -replace=aws_eks_addon.coredns \
-  -replace=aws_eks_addon.ebs_csi_driver \
-  -replace=aws_eks_addon.metrics_server
+cd infra
+terraform init
+terraform fmt
+terraform validate
+terraform plan
+terraform apply
 ```
 
-O EKS não aceita pular minors num cluster existente — da 1.34 para a 1.36 são dois ciclos.
+## Regras de integração
 
-### Destruir
+Regras que os repositórios consumidores seguem ao ler os outputs deste módulo:
+
+- **`key` distinta por repositório.** Todos usam o bucket `archtechs-infra`, mas cada root
+  module precisa da própria chave como por exemplo: `database/terraform.tfstate`.
+- **Não recrie o que já existe.** O namespace e a StorageClass são criados aqui; use
+  `local.infra.namespace` e `local.infra.storage_class_name`.
+
+## Publicando a imagem no ECR
+
+O repositório ECR é provisionado aqui, segue um exemplo de como subir uma imagem:
 
 ```bash
-terraform -chdir=infra destroy
-```
+REPO=$(terraform -chdir=infra output -raw ecr_repository_url)
 
-> **Destrua os workloads primeiro.** Rode o `destroy` dos repositórios de banco e de
-> aplicação antes deste. O namespace é criado aqui; removê-lo com workloads dentro quebra o
-> destroy deles e pode deixar volumes EBS órfãos sendo cobrados.
+docker build --platform linux/amd64 -t "$REPO:$GIT_SHA" .
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin "$REPO"
+docker push "$REPO:$GIT_SHA"
+```
 
 ---
 
-## 2. Conectar o kubectl ao cluster
+## Diagnóstico do cluster
+
+```bash
+kubectl get nodes -o wide
+kubectl get pods -n kube-system
+kubectl get storageclass
+kubectl top nodes
+kubectl get events -A --sort-by=.lastTimestamp | tail -30
+kubectl port-forward -n tech-challenge service/spring-app-service 8080:80  # ver "Conectar o kubectl ao cluster"
+
+aws eks describe-nodegroup --cluster-name tech-challenge --nodegroup-name default --region us-east-1
+aws eks describe-addon --cluster-name tech-challenge --addon-name aws-ebs-csi-driver --region us-east-1
+aws eks list-access-entries --cluster-name tech-challenge --region us-east-1
+```
+
+---
+
+## Conectar o kubectl ao cluster
 
 ```bash
 aws eks update-kubeconfig --region us-east-1 --name tech-challenge
@@ -217,7 +187,6 @@ kubectl get svc,deploy -n tech-challenge
 ```
 
 ```bash
-
 # Deployment da API: porta 8080 do container -> 8080 na máquina local
 kubectl port-forward -n tech-challenge deployment/tech-challenge-app 8080:8080
 ```
@@ -226,104 +195,25 @@ Com o port forward aberto, a API fica acessível na rota `http://localhost:8080`
 
 ---
 
-## 3. Pipeline no GitHub Actions
+## Pipeline no GitHub Actions
 
 | Workflow | Dispara em | O que faz |
 | --- | --- | --- |
-| `terraform-plan.yml` | pull request para a `main`, ou manual | `fmt -check`, `init`, `validate`, `plan` |
-| `terraform-apply.yml` | push na `main` que toque em `infra/**`, ou manual | `init`, `apply -auto-approve`, `output` |
+| `terraform-plan.yml` | Abertura de pull request para a `main`, ou manual | `fmt -check`, `init`, `validate`, `plan` |
+| `terraform-apply.yml` | Merge de pull request na `main`, ou manual | `init`, `apply -auto-approve`, `output` |
 | `terraform-destroy.yml` | só manual | exige a palavra `destroy` digitada, depois `destroy -auto-approve` |
 
-Os três secrets da AWS ficam no **environment `prod`** (Settings → Environments → prod):
-`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e `AWS_SESSION_TOKEN`.
+As pipelines dependem de 2 secrets:
+- `AWS_CREDENTIALS`: contém as credenciais necessárias da AWS. Elas extraem as informações do secret e criam estas 3 variáveis em tempo de execução:
+  - `AWS_ACCESS_KEY_ID`
+  - `AWS_SECRET_ACCESS_KEY`
+  - `AWS_SESSION_TOKEN`
+- `NEW_RELIC_LICENSE_KEY`: chavem de licença do New Relic, ferramenta de APM utilizada no projeto.
 
-```bash
-gh secret set AWS_ACCESS_KEY_ID     --env prod --body "$AWS_ACCESS_KEY_ID"
-gh secret set AWS_SECRET_ACCESS_KEY --env prod --body "$AWS_SECRET_ACCESS_KEY"
-gh secret set AWS_SESSION_TOKEN     --env prod --body "$AWS_SESSION_TOKEN"
-```
-
-> São credenciais de sessão do Learner Lab: **expiram junto com o lab** e precisam ser
-> recoladas a cada sessão nova. Sem o `AWS_SESSION_TOKEN` a autenticação falha com
-> `InvalidClientTokenId`, que parece chave errada e não é.
-
-> **Todo job que usa esses secrets precisa declarar `environment: prod`.** Secrets de
-> environment não chegam a jobs que não o referenciam: `${{ secrets.AWS_* }}` vira string
-> vazia e a action falha com `Could not load credentials from any providers`.
+> Nota: As credenciais AWS expiram a cada 4 horas, portanto novas chaves devem ser criadas e atualizadas no secret sempre que for rodar a pipeline. Para fazer isso, basta reuniciar o lab do AWS Academy.
 
 ---
 
 ## Integração com os outros repositórios
 
-Os outputs de `infra/outputs.tf` são o **contrato público** deste módulo. Os repositórios de
-banco de dados e de aplicação os leem do state remoto:
-
-```hcl
-data "terraform_remote_state" "infra" {
-  backend = "s3"
-  config = {
-    bucket = "archtechs-infra"
-    key    = "infra-cluster/terraform.tfstate"
-    region = "us-east-1"
-  }
-}
-
-locals {
-  infra = data.terraform_remote_state.infra.outputs
-}
-
-provider "kubernetes" {
-  host                   = local.infra.cluster_endpoint
-  cluster_ca_certificate = base64decode(local.infra.cluster_certificate_authority_data)
-
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    command     = "aws"
-    args = [
-      "eks", "get-token",
-      "--cluster-name", local.infra.cluster_name,
-      "--region", local.infra.aws_region,
-    ]
-  }
-}
-```
-
-### Regras de convivência
-
-- **`key` distinta por repositório.** Todos usam o bucket `archtechs-infra`, mas cada root
-  module precisa da própria chave — ex.: `database/terraform.tfstate` e `app/terraform.tfstate`.
-- **Não recrie o que já existe.** O namespace e a StorageClass são criados aqui; use
-  `local.infra.namespace` e `local.infra.storage_class_name`.
-- **Acesso ao cluster.** Pipeline consumidora com IAM role diferente precisa do ARN dela em
-  `var.cluster_admin_role_arns` **deste** repositório, senão recebe `Unauthorized`.
-
-### Publicando a imagem no ECR
-
-O repositório ECR é provisionado aqui, mas o build e o push são da pipeline da aplicação. O
-`--platform linux/amd64` é obrigatório: os nós são `AL2023_x86_64_STANDARD`, e uma imagem
-arm64 dá `ImagePullBackOff`.
-
-```bash
-REPO=$(terraform -chdir=infra output -raw ecr_repository_url)
-
-docker build --platform linux/amd64 -t "$REPO:$GIT_SHA" .
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin "$REPO"
-docker push "$REPO:$GIT_SHA"
-```
-
----
-
-## Diagnóstico do cluster
-
-```bash
-kubectl get nodes -o wide
-kubectl get pods -n kube-system
-kubectl get storageclass
-kubectl top nodes
-kubectl get events -A --sort-by=.lastTimestamp | tail -30
-kubectl port-forward -n tech-challenge service/spring-app-service 8080:80  # ver "Acessar a aplicação da máquina local"
-
-aws eks describe-nodegroup --cluster-name tech-challenge --nodegroup-name default --region us-east-1
-aws eks describe-addon --cluster-name tech-challenge --addon-name aws-ebs-csi-driver --region us-east-1
-aws eks list-access-entries --cluster-name tech-challenge --region us-east-1
-```
+Os outputs de `infra/outputs.tf` expõe os ids dos recursos provisionados por este repositório para que os outros repositórios possam fazer a devida integração com o cluster Kubernetes e seus recursos.
