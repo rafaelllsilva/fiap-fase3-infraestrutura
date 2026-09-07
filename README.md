@@ -88,6 +88,8 @@ flowchart TB
       ng["<b>Managed Node Group default</b><br/><i>t3.medium · ON_DEMAND · AL2023</i>"]
       ns["<b>Namespace tech-challenge</b>"]
       sc["<b>StorageClass gp3</b><br/><i>default · ebs.csi.aws.com</i>"]
+      nsnr["<b>Namespace newrelic</b>"]
+      nrbundle["<b>New Relic Bundle</b><br/><i>Agente APM</i>"]
     end
   end
 
@@ -102,7 +104,7 @@ flowchart TB
   ecr -.->|"docker pull"| ng
   class ci,consumidores externo
   class net rede
-  class cp,addons,ng,ns,sc k8s
+  class cp,addons,ng,ns,sc,nsnr,nrbundle k8s
   class state,ecr dados
 ```
 
