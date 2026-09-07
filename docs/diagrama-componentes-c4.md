@@ -37,10 +37,15 @@ flowchart TB
         addons["<b>Add-ons do cluster</b><br/><i>[vpc-cni · kube-proxy · coredns]</i><br/>Addons para networking, storage a métricas"]
         sc["<b>Storage Class</b><br/><i>[EBS gp3]</i><br/>Permite provisionamento de PersistentVolumeClaims"]
 
-        subgraph ng["Node Group - t3.medium - subnets privadas"]
+        subgraph nsnr["Namespace newrelic"]
+          direction TB
+            nrbundle["<b>New Relic Bundle</b><br/><i>[Observabilidade]</i><br/>Agente para instrumentar a API de OS"]
+        end
+
+        subgraph ns["Namespace tech-challenge"]
           direction TB
 
-          subgraph ns["Namespace tech-challenge"]
+          subgraph ng["Node Group - t3.medium - subnets privadas"]
             direction TB
 
             svcapi["<b>Service da API</b><br/><i>[LoadBalancer → 8080]</i><br/>Faz o balanceamento de carga entre os Pods da API"]
@@ -65,11 +70,12 @@ flowchart TB
   app      -->|"<i>Consulta dados da aplicação</i></br>[JDBC :5432]"| rds
   app      -.->|"<i>Fornece imagem da API de OS</i></br>[docker pull]"| ecr
   rota     -.->|"<i></i>Saída para a internet</br>[0.0.0.0/0]"| ng
-  app      -.->|"<i></i>Agente de APM</br>[events, traces e logs]"| newrelic
+  app      -.->|"<i></i>Coleta dados de APM</br>[events, traces e logs]"| nrbundle
+  nrbundle      -.->|"<i></i>Envia dados coletados ao New Relic</br>[events, traces e logs]"| newrelic
 
   class pessoa,postman,newrelic externo
   class apigw,lambda borda
   class nlb,rota rede
-  class cp,addons,svcapi,hpa,pdb,app k8s
+  class cp,addons,svcapi,hpa,pdb,app,nrbundle k8s
   class ecr,sc,rds dados
 ```
