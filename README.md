@@ -112,7 +112,7 @@ infra/
 ├── main.tf         VPC, EKS + addons, node group, ECR, namespace, StorageClass
 ├── variables.tf    input variables
 └── outputs.tf      contrato de integração com os outros repositórios
-script-criar-backend.sh   bootstrap manual do bucket S3 do state
+script-criar-backend.sh   bootstrap idempotente do bucket S3 do state (CI + uso manual)
 ```
 
 ## Pré-requisitos
@@ -126,8 +126,10 @@ script-criar-backend.sh   bootstrap manual do bucket S3 do state
 Credenciais AWS válidas na cadeia padrão do SDK. Numa conta do **AWS Academy Learner Lab** a
 sessão expira junto com o lab — confirme com `aws sts get-caller-identity` antes de começar.
 
-O bucket S3 do state (`archtechs-infra`) não é criado por este Terraform: é bootstrap manual,
-feito uma única vez com `script-criar-backend.sh`.
+O bucket S3 do state (`archtechs-infra`) não é criado por este Terraform. As pipelines de CI
+já garantem que ele exista, rodando `script-criar-backend.sh` (idempotente) antes de cada
+`terraform init`. Para rodar localmente antes de qualquer CI, execute o mesmo script uma vez:
+`sh script-criar-backend.sh`.
 
 ---
 

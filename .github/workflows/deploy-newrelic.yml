@@ -1,0 +1,123 @@
+name: Deploy New Relic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: tech-challenge
+  NEW_RELIC_NAMESPACE: newrelic
+  HELM_VERSION: v3.16.4
+  NRI_BUNDLE_VERSION: 8.0.22
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    timeout-minutes: 30
+    env:
+      NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Credenciais de sessão do AWS Academy Lab (secret único, 3 chaves)
+      - name: Extrair credenciais AWS
+        id: aws_creds
+        env:
+          AWS_CREDENTIALS: ${{ secrets.AWS_CREDENTIALS }}
+        run: |
+          access_key_id=$(grep '^aws_access_key_id=' <<< "$AWS_CREDENTIALS" | cut -d= -f2-)
+          secret_access_key=$(grep '^aws_secret_access_key=' <<< "$AWS_CREDENTIALS" | cut -d= -f2-)
+          session_token=$(grep '^aws_session_token=' <<< "$AWS_CREDENTIALS" | cut -d= -f2-)
+          echo "::add-mask::$access_key_id"
+          echo "::add-mask::$secret_access_key"
+          echo "::add-mask::$session_token"
+          {
+            echo "access_key_id=$access_key_id"
+            echo "secret_access_key=$secret_access_key"
+            echo "session_token=$session_token"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ steps.aws_creds.outputs.access_key_id }}
+          aws-secret-access-key: ${{ steps.aws_creds.outputs.secret_access_key }}
+          aws-session-token: ${{ steps.aws_creds.outputs.session_token }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configurar acesso ao EKS
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
+
+      - name: Validar nodes Ready
+        run: |
+          if ! kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}' | awk '$2 == "True" { ready++ } END { exit ready == 0 }'; then
+            echo "::error::Nenhum node Ready foi encontrado no EKS. Escale ou recupere o node group antes de instalar o New Relic."
+            exit 1
+          fi
+
+      - name: Instalar Helm
+        uses: azure/setup-helm@v4.2.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Criar namespace e Secret do New Relic
+        run: |
+          if [ -z "$NEW_RELIC_LICENSE_KEY" ]; then
+            echo "::error::O secret NEW_RELIC_LICENSE_KEY não está configurado no Environment prod."
+            exit 1
+          fi
+
+          kubectl create namespace "$NEW_RELIC_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n "$NEW_RELIC_NAMESPACE" create secret generic newrelic-license \
+            --from-literal=licenseKey="$NEW_RELIC_LICENSE_KEY" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n "$NEW_RELIC_NAMESPACE" create secret generic newrelic-key-secret \
+            --from-literal=new_relic_license_key="$NEW_RELIC_LICENSE_KEY" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Instalar ou atualizar o New Relic bundle
+        run: |
+          helm repo add newrelic https://helm-charts.newrelic.com --force-update
+          helm repo update
+          helm upgrade --install newrelic-bundle newrelic/nri-bundle \
+            --namespace "$NEW_RELIC_NAMESPACE" \
+            --create-namespace \
+            --version "$NRI_BUNDLE_VERSION" \
+            --values k8s/newrelic/values.yaml \
+            --wait \
+            --timeout 10m
+
+      - name: Aguardar webhook do K8s Agents Operator
+        run: |
+          operator_deployment="newrelic-bundle-k8s-agents-operator"
+          webhook_service="${operator_deployment}-webhook-service"
+
+          kubectl rollout status deployment/"$operator_deployment" \
+            -n "$NEW_RELIC_NAMESPACE" \
+            --timeout=5m
+
+          for attempt in {1..30}; do
+            if [ -n "$(kubectl get endpoints "$webhook_service" -n "$NEW_RELIC_NAMESPACE" -o jsonpath='{.subsets[*].addresses[*].ip}')" ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "::error::O webhook do K8s Agents Operator não recebeu endpoint Ready após 150 segundos."
+          kubectl get deployment,pods,endpoints -n "$NEW_RELIC_NAMESPACE"
+          exit 1
+
+      - name: Aplicar auto-attach Java
+        run: |
+          kubectl apply -f k8s/newrelic/instrumentation.yaml
+          kubectl delete secret newrelic-key-secret -n tech-challenge --ignore-not-found
+
+      - name: Validar instalação
+        run: |
+          helm status newrelic-bundle -n "$NEW_RELIC_NAMESPACE"
+          kubectl get pods -n "$NEW_RELIC_NAMESPACE"
+          kubectl get instrumentation -n "$NEW_RELIC_NAMESPACE"
+          kubectl wait --for=condition=Ready pod --all -n "$NEW_RELIC_NAMESPACE" --timeout=10m

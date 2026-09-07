@@ -48,21 +48,11 @@ New Relic: Kubernetes, APM, Logs, Traces, Dashboards e Alerts
 
 ## Instalação da integração Kubernetes
 
-Pré-requisito: criar manualmente o Secret `newrelic-license` no namespace `newrelic`, usando uma chave **Ingest - License** válida. O valor da chave não deve ser versionado.
+A instalação e atualização oficial do New Relic é feita manualmente pela workflow GitHub **Deploy New Relic** (`.github/workflows/deploy-newrelic.yml`). Ela usa o Environment `prod`, configura o acesso ao EKS canônico `tech-challenge`, cria ou atualiza o namespace e o Secret, instala o bundle e aplica o auto-attach Java. Não executar esses passos a partir de máquinas locais.
 
-```bash
-helm repo add newrelic https://helm-charts.newrelic.com
-helm repo update
+Pré-requisito: cadastrar uma chave **Ingest - License** válida no GitHub Environment `prod` como o secret `NEW_RELIC_LICENSE_KEY`. A chave nunca deve ser versionada em `values.yaml`, manifests, variáveis Terraform, state, documentação ou logs. A workflow cria os Secrets Kubernetes do bundle e do K8s Agents Operator no namespace `newrelic` sem imprimir seu valor.
 
-helm upgrade --install newrelic-bundle newrelic/nri-bundle \
-  --namespace newrelic \
-  --create-namespace \
-  --values k8s/newrelic/values.yaml \
-  --wait \
-  --timeout 10m
-
-kubectl apply -f k8s/newrelic/instrumentation.yaml
-```
+A workflow falha antes da instalação caso não exista node `Ready`; escale ou recupere o node group e execute-a novamente. Ela não reinicia a aplicação: após a instalação do auto-attach, faça um novo deploy da aplicação pelo fluxo do repositório da aplicação para que os novos pods recebam o agente Java. Antes desse deploy, a workflow remove a cópia da chave do namespace `tech-challenge`, para que o operador a replique novamente a partir da chave atual.
 
 ### Seleção para APM
 
@@ -105,18 +95,25 @@ kubectl top pods -n tech-challenge
 
 ```bash
 kubectl get pods -n tech-challenge --show-labels
-kubectl get pod <pod-spring> -n tech-challenge \
+kubectl get pod <pod-app> -n tech-challenge \
   -o jsonpath='{.spec.initContainers[*].name}'
 ```
 
-O resultado deve conter um init container com prefixo `nri-java--`, por exemplo `nri-java--spring-app-container`.
+Após o novo deploy da aplicação, valide especificamente o init container esperado:
+
+```bash
+kubectl get pod <pod-app> -n tech-challenge \
+  -o jsonpath='{.spec.initContainers[*].name}' | tr ' ' '\n' | grep -x 'nri-java--tech-challenge-app'
+```
+
+O comando deve retornar `nri-java--tech-challenge-app`. Se não retornar, confirme os labels `app=tech-challenge-app` no pod e o namespace `tech-challenge`.
 
 ### Gerar uma transação de teste
 
 Em um terminal:
 
 ```bash
-kubectl port-forward -n tech-challenge service/spring-app-service 8080:80
+kubectl port-forward -n tech-challenge service/tech-challenge-app-service 8080:80
 ```
 
 Em outro terminal:
@@ -128,7 +125,7 @@ for i in {1..50}; do
 done
 ```
 
-Apos alguns minutos, a transacao deve aparecer em **APM & Services** no servico `spring-app-deployment`.
+Apos alguns minutos, a transacao deve aparecer em **APM & Services** no servico `tech-challenge-app`.
 
 ## Dashboard
 
@@ -151,7 +148,7 @@ Nome: `Tech Challenge - Observability`.
 ```sql
 FROM Transaction
 SELECT average(duration) * 1000 AS 'Average response time (ms)'
-WHERE appName = 'spring-app-deployment' AND transactionType = 'Web'
+WHERE appName = 'tech-challenge-app' AND transactionType = 'Web'
 TIMESERIES
 ```
 
@@ -160,7 +157,7 @@ TIMESERIES
 ```sql
 FROM Transaction
 SELECT rate(count(*), 1 minute) AS 'Requests per minute'
-WHERE appName = 'spring-app-deployment' AND transactionType = 'Web'
+WHERE appName = 'tech-challenge-app' AND transactionType = 'Web'
 TIMESERIES
 ```
 
@@ -169,7 +166,7 @@ TIMESERIES
 ```sql
 FROM Transaction
 SELECT percentage(count(*), WHERE error IS true) AS 'Error rate (%)'
-WHERE appName = 'spring-app-deployment' AND transactionType = 'Web'
+WHERE appName = 'tech-challenge-app' AND transactionType = 'Web'
 TIMESERIES
 ```
 
@@ -180,7 +177,7 @@ FROM K8sContainerSample
 SELECT average(cpuUsedCores) AS 'CPU cores'
 WHERE clusterName = 'tech-challenge'
   AND namespaceName = 'tech-challenge'
-  AND containerName = 'spring-app-container'
+  AND containerName = 'tech-challenge-app'
 FACET podName TIMESERIES
 ```
 
@@ -191,7 +188,7 @@ FROM K8sContainerSample
 SELECT average(memoryWorkingSetBytes) / 1024 / 1024 AS 'Memory (MiB)'
 WHERE clusterName = 'tech-challenge'
   AND namespaceName = 'tech-challenge'
-  AND containerName = 'spring-app-container'
+  AND containerName = 'tech-challenge-app'
 FACET podName TIMESERIES
 ```
 
@@ -202,7 +199,7 @@ FROM K8sDeploymentSample
 SELECT latest(podsDesired) AS 'Desired', latest(podsAvailable) AS 'Available'
 WHERE clusterName = 'tech-challenge'
   AND namespaceName = 'tech-challenge'
-  AND deploymentName = 'spring-app-deployment'
+  AND deploymentName = 'tech-challenge-app'
 TIMESERIES
 ```
 
@@ -217,7 +214,7 @@ LIMIT 20
 
 ## Telemetria de negocio pendente
 
-Os paineis tecnicos nao substituem as metricas de negocio solicitadas. A aplicacao deve emitir logs JSON e/ou eventos customizados quando:
+Os paineis tecnicos nao substituem as metricas de negocio solicitadas. Os logs JSON estruturados da aplicacao sao coletados do stdout do container pelo New Relic Logging; nao adicionar SDK New Relic a aplicacao apenas para logs. A aplicacao deve emitir logs JSON e/ou eventos customizados quando:
 
 1. uma ordem de servico e criada;
 2. uma ordem muda de status;
@@ -226,7 +223,7 @@ Os paineis tecnicos nao substituem as metricas de negocio solicitadas. A aplicac
 Campos minimos recomendados:
 
 ```text
-eventType
+serviceOrderEventType
 orderId
 fromStatus
 toStatus
@@ -235,12 +232,12 @@ timestamp
 traceId
 ```
 
-Eventos sugeridos:
+Valores esperados para `serviceOrderEventType`:
 
 ```text
-ServiceOrderCreated
-ServiceOrderStatusChanged
-ServiceOrderProcessingFailed
+service_order_created
+service_order_status_changed
+service_order_processing_failed
 ```
 
 Depois da implementacao, acrescentar ao dashboard:
@@ -253,7 +250,7 @@ Depois da implementacao, acrescentar ao dashboard:
 
 Depois que os eventos de negocio forem implementados, criar:
 
-1. alerta para qualquer `ServiceOrderProcessingFailed` em cinco minutos;
+1. alerta para qualquer `serviceOrderEventType = 'service_order_processing_failed'` em cinco minutos;
 2. alerta de taxa de erro da API acima do limite definido pelo time, por exemplo 5% por cinco minutos;
 3. alerta de indisponibilidade do endpoint publico depois do API Gateway.
 
