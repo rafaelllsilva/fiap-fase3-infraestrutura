@@ -58,7 +58,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Criar bucket S3 do backend
-        run: sh script-criar-backend.sh
+        run: sh infra/script-criar-backend.sh
 
       - name: Executar init
         run: terraform -chdir=infra init -input=false
