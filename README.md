@@ -21,6 +21,7 @@ StorageClass.
 - [Conectar o kubectl ao cluster](#conectar-o-kubectl-ao-cluster)
 - [Pipeline no GitHub Actions](#pipeline-no-github-actions)
 - [Integração com os outros repositórios](#integração-com-os-outros-repositórios)
+- [Documentações do Projeto](#documentações)
 
 ---
 
@@ -226,3 +227,12 @@ As pipelines dependem de 2 secrets:
 ## Integração com os outros repositórios
 
 Os outputs de `infra/outputs.tf` expõe os ids dos recursos provisionados por este repositório para que os outros repositórios possam fazer a devida integração com o cluster Kubernetes e seus recursos.
+
+## Documentações
+
+As documentações do projeto se encontram no diretório **/docs**, e está organizado desta forma:
+- [`ADR`](./docs/adr/) -> ADRs do projeto
+- [`Banco de Dados`](./docs/banco-de-dados/): Documentos do banco de dados (decisão e modelo de Entidade-Relacionamento)
+- [`C4`](./docs/c4/): Diagrama do C4 Model
+- [`RFC`](./docs/rfc/): RFCs do projeto
+- [`Diagrama de Sequência`](./docs/sequencia/): Diagrama de Sequência
