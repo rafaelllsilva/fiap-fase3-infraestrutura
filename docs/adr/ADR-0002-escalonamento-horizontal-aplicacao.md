@@ -6,7 +6,7 @@
 | Autor       | Hyun Min Cho                                         |
 | Data        | 07-09-2026                                           |
 | Repositório afetado | `tech-challenge-app`                          |
-| RFC relacionada | Nenhuma |
+| RFC relacionada | Não há RFC dedicada |
 
 ## Contexto
 

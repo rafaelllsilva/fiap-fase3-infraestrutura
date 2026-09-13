@@ -42,3 +42,4 @@ Não expor o Amazon RDS publicamente e restringir o acesso de rede exclusivament
 ## Referências
 
 - [`RFC-0001 — Banco de Dados da Aplicação (Tech Challenge)`](../rfc/RFC-0001-banco-de-dados.md)
+- Repositório: [`tech-challenge-infra-db`](https://github.com/theodirk21/tech-challenge-infra-db)

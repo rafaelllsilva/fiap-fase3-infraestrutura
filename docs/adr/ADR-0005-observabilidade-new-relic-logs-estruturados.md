@@ -6,7 +6,7 @@
 | Autor       | Hyun Min Cho                                         |
 | Data        | 07-09-2026                                           |
 | Repositório afetado | `fiap-fase3-infraestrutura`                   |
-| RFC relacionada | Não há RFC dedicada; requisito de observabilidade descrito na Seção 7 do `DOCUMENTACAO_TECNICA_FASE_3.md` |
+| RFC relacionada | Não há RFC dedicada |
 
 ## Contexto
 
