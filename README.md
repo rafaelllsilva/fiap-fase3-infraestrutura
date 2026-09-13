@@ -231,7 +231,7 @@ Os outputs de `infra/outputs.tf` expõe os ids dos recursos provisionados por es
 ## Documentações
 
 As documentações do projeto se encontram no diretório **/docs**, e está organizado desta forma:
-- [`ADR`](./docs/adr/) -> ADRs do projeto
+- [`ADR`](./docs/adr/): ADRs do projeto
 - [`Banco de Dados`](./docs/banco-de-dados/): Documentos do banco de dados (decisão e modelo de Entidade-Relacionamento)
 - [`C4`](./docs/c4/): Diagrama do C4 Model
 - [`RFC`](./docs/rfc/): RFCs do projeto
