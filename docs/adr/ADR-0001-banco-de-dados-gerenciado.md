@@ -49,7 +49,7 @@ Ver RFC-0001 para a análise completa. Resumo:
 
 ## Referências
 
-- [`RFC-0001 — Banco de Dados da Aplicação (Tech Challenge)`](RFC-0001-banco-de-dados.md)
-- [`Justificativa Formal da Escolha do Banco de Dados`](Justificativa-Formal-Escolha-do-Banco-de-Dados.md)
-- [`Modelo Relacional e Diagrama ER`](Modelo-Relacional-e-Diagrama-ER.md)
+- [`RFC-0001 — Banco de Dados da Aplicação (Tech Challenge)`](../rfc/RFC-0001-banco-de-dados.md)
+- [`Justificativa Formal da Escolha do Banco de Dados`](../entidade-relacionamento/Justificativa-Formal-Escolha-do-Banco-de-Dados.md)
+- [`Modelo Relacional e Diagrama ER`](../entidade-relacionamento/Modelo-Relacional-e-Diagrama-ER.md)
 - Repositório: [`tech-challenge-infra-db`](https://github.com/theodirk21/tech-challenge-infra-db) — `main.tf`, `variables.tf`, `outputs.tf`
