@@ -320,18 +320,18 @@ resource "aws_ecr_repository" "this" {
 # 5. Recursos compartilhados no cluster
 # ---------------------------------------------------------------------------
 # Namespace onde os repositórios de banco de dados e de app deve ser implantados
-resource "kubernetes_namespace_v1" "this" {
-  metadata {
-    name = var.namespace
+# resource "kubernetes_namespace_v1" "this" {
+#   metadata {
+#     name = var.namespace
 
-    labels = {
-      "app.kubernetes.io/managed-by" = "Terraform"
-      environment                    = var.environment
-    }
-  }
+#     labels = {
+#       "app.kubernetes.io/managed-by" = "Terraform"
+#       environment                    = var.environment
+#     }
+#   }
 
-  depends_on = [aws_eks_node_group.this]
-}
+#   depends_on = [aws_eks_node_group.this]
+# }
 
 # --- Access entries adicionais ---------------------------------------------
 resource "aws_eks_access_entry" "admin" {
