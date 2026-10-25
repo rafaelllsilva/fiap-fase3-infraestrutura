@@ -4,8 +4,7 @@
 
 Infraestrutura do Tech Challenge Fase 3. O Terraform em `infra/` provisiona um
 cluster Kubernetes no Amazon EKS, VPC com subnets públicas/privadas, NAT Gateway, addons, managed
-node group e repositório ECR, além dos recursos de cluster compartilhados como namespace e
-StorageClass.
+node group e repositório ECR, além do recurso de cluster compartilhado StorageClass.
 
 ## Índice
 
@@ -29,9 +28,9 @@ StorageClass.
 
 - Provisionar o cluster Kubernetes completo no Amazon EKS (control plane, addons de rede e
   storage, managed node group) e a VPC em que ele roda via Terraform.
-- Recursos compartilhados de cluster: cria o namespace `tech-challenge`, a StorageClass
-  `gp3` default e os addons que os workloads dependem (`aws-ebs-csi-driver` para
-  PersistentVolumeClaims, `metrics-server` para HPA).
+- Recursos compartilhados de cluster: cria a StorageClass `gp3` default e os addons
+  que os workloads dependem (`aws-ebs-csi-driver` para PersistentVolumeClaims,
+  `metrics-server` para HPA).
 - Registro de imagens: provisiona o repositório Amazon ECR usado pela pipeline da aplicação para publicar a imagem Docker.
 
 ## Tecnologias
@@ -51,7 +50,7 @@ infra/
 ├── versions.tf     bloco terraform{} — required_version, required_providers
 ├── backend.tf      bloco terraform{} — backend "s3"
 ├── providers.tf    providers aws e kubernetes
-├── main.tf         VPC, EKS + addons, node group, ECR, namespace, StorageClass
+├── main.tf         VPC, EKS + addons, node group, ECR, StorageClass
 ├── variables.tf    input variables
 └── outputs.tf      contrato de integração com os outros repositórios
 script-criar-backend.sh   bootstrap idempotente do bucket S3 do state (CI + uso manual)
@@ -135,8 +134,9 @@ Regras que os repositórios consumidores seguem ao ler os outputs deste módulo:
 
 - **`key` distinta por repositório.** Todos usam o bucket `archtechs-infra-fase4`, mas cada root
   module precisa da própria chave como por exemplo: `database/terraform.tfstate`.
-- **Não recrie o que já existe.** O namespace e a StorageClass são criados aqui; use
-  `local.infra.namespace` e `local.infra.storage_class_name`.
+- **Não recrie a StorageClass.** Ela é criada aqui; use `local.infra.storage_class_name`.
+  O namespace não é mais criado por este repositório — cada repositório consumidor cria
+  o próprio namespace `tech-challenge`.
 
 ## Publicando a imagem no ECR
 

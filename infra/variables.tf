@@ -100,12 +100,6 @@ variable "ecr_repository_name" {
 # Recursos compartilhados no cluster
 # ---------------------------------------------------------------------------
 
-variable "namespace" {
-  type        = string
-  default     = "tech-challenge"
-  description = "Namespace Kubernetes compartilhado, criado por este módulo (kubernetes_namespace_v1.this) e consumido pelos repositórios de banco de dados e de aplicação através do output `namespace`. Criado aqui porque nenhum dos dois repositórios pode ser dono dele sem conflitar com o outro."
-}
-
 variable "cluster_admin_role_arns" {
   type        = list(string)
   default     = []
