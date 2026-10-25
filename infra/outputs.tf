@@ -90,11 +90,6 @@ output "node_role_arn" {
 # Recursos compartilhados no cluster
 # ---------------------------------------------------------------------------
 
-# output "namespace" {
-#   value       = kubernetes_namespace_v1.this.metadata[0].name
-#   description = "Namespace criado por este módulo. Os repositórios de banco e de aplicação devem implantar dentro dele em vez de criar o próprio."
-# }
-
 output "storage_class_name" {
   value       = kubernetes_storage_class_v1.ebs_gp3.metadata[0].name
   description = "Nome da StorageClass default do cluster (EBS gp3). O repositório do banco deve referenciá-la no volumeClaimTemplates em vez de declarar a própria StorageClass."
