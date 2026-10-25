@@ -6,7 +6,7 @@
 #
 #   data "terraform_remote_state" "infra" {
 #     backend = "s3"
-#     config  = { bucket = "archtechs-infra", key = "terraform.tfstate", region = "us-east-1" }
+#     config  = { bucket = "archtechs-infra-fase4", key = "terraform.tfstate", region = "us-east-1" }
 #   }
 #
 # Trate remoções e renomeações como quebra de contrato: há repositórios

@@ -16,7 +16,7 @@ variable "environment" {
 
 variable "project_name" {
   type        = string
-  default     = "archtechs-infra"
+  default     = "archtechs-infra-fase4"
   description = "Nome do projeto, usado como prefixo de nomes (ex.: VPC) e nas tags padrão de todos os recursos."
 }
 

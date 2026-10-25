@@ -74,7 +74,7 @@ flowchart TB
   subgraph aws["CONTA AWS — AWS Academy Learner Lab · us-east-1"]
     direction TB
 
-    state["<b>Amazon S3 — archtechs-infra</b><br/><i>backend do state · infra-cluster/terraform.tfstate</i><br/>lock nativo (use_lockfile)"]
+    state["<b>Amazon S3 — archtechs-infra-fase4</b><br/><i>backend do state · infra-cluster/terraform.tfstate</i><br/>lock nativo (use_lockfile)"]
     ecr["<b>Amazon ECR</b><br/><i>tech-challenge-app · scan on push</i>"]
 
     subgraph vpc["VPC — 10.0.0.0/16 · module terraform-aws-modules/vpc/aws"]
@@ -133,7 +133,7 @@ terraform apply
 
 Regras que os repositórios consumidores seguem ao ler os outputs deste módulo:
 
-- **`key` distinta por repositório.** Todos usam o bucket `archtechs-infra`, mas cada root
+- **`key` distinta por repositório.** Todos usam o bucket `archtechs-infra-fase4`, mas cada root
   module precisa da própria chave como por exemplo: `database/terraform.tfstate`.
 - **Não recrie o que já existe.** O namespace e a StorageClass são criados aqui; use
   `local.infra.namespace` e `local.infra.storage_class_name`.
