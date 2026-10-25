@@ -5,7 +5,7 @@
 # pipelines de CI antes de cada `terraform init`.
 set -e
 
-BUCKET="archtechs-infra"
+BUCKET="archtechs-infra-fase4"
 REGION="us-east-1"
 
 if aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null; then

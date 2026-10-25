@@ -6,7 +6,7 @@
 #
 #   data "terraform_remote_state" "infra" {
 #     backend = "s3"
-#     config  = { bucket = "archtechs-infra", key = "terraform.tfstate", region = "us-east-1" }
+#     config  = { bucket = "archtechs-infra-fase4", key = "terraform.tfstate", region = "us-east-1" }
 #   }
 #
 # Trate remoções e renomeações como quebra de contrato: há repositórios
@@ -89,11 +89,6 @@ output "node_role_arn" {
 # ---------------------------------------------------------------------------
 # Recursos compartilhados no cluster
 # ---------------------------------------------------------------------------
-
-output "namespace" {
-  value       = kubernetes_namespace_v1.this.metadata[0].name
-  description = "Namespace criado por este módulo. Os repositórios de banco e de aplicação devem implantar dentro dele em vez de criar o próprio."
-}
 
 output "storage_class_name" {
   value       = kubernetes_storage_class_v1.ebs_gp3.metadata[0].name
