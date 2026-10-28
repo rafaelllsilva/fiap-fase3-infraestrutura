@@ -9,6 +9,7 @@ StorageClass.
 
 ## Índice
 
+- [Fase 4 — SAGA e observabilidade](docs/fase4/README.md)
 - [Propósito](#propósito)
 - [Tecnologias](#tecnologias)
 - [Estrutura do repositório](#estrutura-do-repositório)
