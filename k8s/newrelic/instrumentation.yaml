@@ -1,39 +1,45 @@
-
 apiVersion: newrelic.com/v1beta2
 kind: Instrumentation
 metadata:
   name: newrelic-instrumentation
   namespace: newrelic
 spec:
-  # The operator copies this Secret to selected workload namespaces.
+  # A workflow mantém esta chave nos namespaces newrelic e tech-challenge.
   licenseKeySecret: newrelic-key-secret
   agent:
-    # Values supported: dotnet, java, nodejs, python, ruby, php
     language: java
 
-    # Values supported: newrelic-java-init:latest, newrelic-dotnet-init:latest, newrelic-node-init:latest, newrelic-python-init:latest, newrelic-ruby-init:latest, newrelic-php-init:latest, newrelic-php-init:musl
     image: newrelic/newrelic-java-init:9.4.0@sha256:f98d055a40a57a1fe3c21cb536a738c30862b5b204acb4afd8886e434dc30818
     env:
       - name: NEW_RELIC_APP_NAME
-        value: tech-challenge-app
+        value: execution-service
+      - name: NEW_RELIC_DISTRIBUTED_TRACING_ENABLED
+        value: "true"
+      - name: NEW_RELIC_APPLICATION_LOGGING_ENABLED
+        value: "true"
+      - name: NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED
+        value: "false"
+      - name: NEW_RELIC_APPLICATION_LOGGING_LOCAL_DECORATING_ENABLED
+        value: "true"
 
-  # Select a namespace with a specific name by using "kubernetes.io/metadata.name" label
+  # Restringir a instrumentação ao workload existente do execution.
   namespaceLabelSelector:
     matchExpressions:
       - key: "kubernetes.io/metadata.name"
         operator: "In"
         values: ["tech-challenge"]
 
-  # Select pods containing a specific label and value
   podLabelSelector:
     matchExpressions:
       - key: "app"
         operator: "In"
-        values: ["tech-challenge-app"]
+        values: ["execution-service"]
 
   containerSelector:
+    # Campo exigido pelo CRD do operador 0.50.0 incluído no bundle 8.0.22.
+    envSelector: {}
     nameSelector:
       matchExpressions:
         - key: "container"
           operator: "In"
-          values: ["tech-challenge-app"]
+          values: ["execution-service"]
