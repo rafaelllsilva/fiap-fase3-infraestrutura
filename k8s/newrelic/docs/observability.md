@@ -1,5 +1,7 @@
 # Observabilidade - Tech Challenge Fase 3
 
+> **Referência histórica da Fase 3.** Para o workload atual, use o [roteiro de validação do execution-service](validacao-execution.md). O manifest de instrumentação agora seleciona `execution-service`; nomes de aplicação, seletores e exemplos do monólito abaixo não são o procedimento vigente da Fase 4.
+
 Este documento descreve a observabilidade do ambiente de produção do Tech Challenge Fase 3: Amazon EKS `tech-challenge`, aplicacao Spring Boot e PostgreSQL no namespace `tech-challenge`.
 
 > Segredos nao devem ser versionados. A chave **Ingest - License** do New Relic deve existir somente como Kubernetes Secret ou secret da pipeline.

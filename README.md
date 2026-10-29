@@ -9,6 +9,7 @@ StorageClass.
 
 ## Índice
 
+- [Validar o execution no New Relic](k8s/newrelic/docs/validacao-execution.md)
 - [Propósito](#propósito)
 - [Tecnologias](#tecnologias)
 - [Estrutura do repositório](#estrutura-do-repositório)
