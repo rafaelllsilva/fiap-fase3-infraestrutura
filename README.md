@@ -4,7 +4,7 @@
 
 Infraestrutura do Tech Challenge Fase 3. O Terraform em `infra/` provisiona um
 cluster Kubernetes no Amazon EKS, VPC com subnets públicas/privadas, NAT Gateway, addons, managed
-node group e repositório ECR, além do recurso de cluster compartilhado StorageClass.
+node group, além do recurso de cluster compartilhado StorageClass.
 
 ## Índice
 
@@ -15,7 +15,6 @@ node group e repositório ECR, além do recurso de cluster compartilhado Storage
 - [Pré-requisitos](#pré-requisitos)
 - [Provisionar o ambiente](#provisionar-o-ambiente)
 - [Regras de integração](#regras-de-integração)
-- [Publicando a imagem no ECR](#publicando-a-imagem-no-ecr)
 - [Diagnóstico do cluster](#diagnóstico-do-cluster)
 - [Conectar o kubectl ao cluster](#conectar-o-kubectl-ao-cluster)
 - [Pipeline no GitHub Actions](#pipeline-no-github-actions)
@@ -31,7 +30,7 @@ node group e repositório ECR, além do recurso de cluster compartilhado Storage
 - Recursos compartilhados de cluster: cria a StorageClass `gp3` default e os addons
   que os workloads dependem (`aws-ebs-csi-driver` para PersistentVolumeClaims,
   `metrics-server` para HPA).
-- Registro de imagens: provisiona o repositório Amazon ECR usado pela pipeline da aplicação para publicar a imagem Docker.
+- Registro de imagens: **não** é provisionado aqui — cada serviço cria o próprio repositório Amazon ECR conforme necessário.
 
 ## Tecnologias
 - Kubernetes 1.36
@@ -39,7 +38,6 @@ node group e repositório ECR, além do recurso de cluster compartilhado Storage
 - Componentes AWS:
   - EKS (cluster Kubernetes)
   - VPC (subnets públicas/privadas, Internet Gateway, NAT Gateway)
-  - ECR (repositório de imagem Docker)
   - S3 (backend do Terraform)
 
 ## Estrutura do repositório
@@ -50,7 +48,7 @@ infra/
 ├── versions.tf     bloco terraform{} — required_version, required_providers
 ├── backend.tf      bloco terraform{} — backend "s3"
 ├── providers.tf    providers aws e kubernetes
-├── main.tf         VPC, EKS + addons, node group, ECR, StorageClass
+├── main.tf         VPC, EKS + addons, node group, StorageClass
 ├── variables.tf    input variables
 └── outputs.tf      contrato de integração com os outros repositórios
 script-criar-backend.sh   bootstrap idempotente do bucket S3 do state (CI + uso manual)
@@ -74,7 +72,6 @@ flowchart TB
     direction TB
 
     state["<b>Amazon S3 — archtechs-infra-fase4</b><br/><i>backend do state · infra-cluster/terraform.tfstate</i><br/>lock nativo (use_lockfile)"]
-    ecr["<b>Amazon ECR</b><br/><i>tech-challenge-app · scan on push</i>"]
 
     subgraph vpc["VPC — 10.0.0.0/16 · module terraform-aws-modules/vpc/aws"]
       direction TB
@@ -96,16 +93,14 @@ flowchart TB
   ci -->|"init / plan / apply"| state
   ci -->|"provisiona"| vpc
   ci -->|"provisiona"| eks
-  ci -->|"provisiona"| ecr
 
   net -->|"subnets"| ng
   cp  -->|"gerencia"| ng
   addons -->|"roda nos nós"| ng
-  ecr -.->|"docker pull"| ng
   class ci,consumidores externo
   class net rede
   class cp,addons,ng,ns,sc,nsnr,nrbundle k8s
-  class state,ecr dados
+  class state dados
 ```
 
 ## Pré-requisitos
@@ -137,18 +132,6 @@ Regras que os repositórios consumidores seguem ao ler os outputs deste módulo:
 - **Não recrie a StorageClass.** Ela é criada aqui; use `local.infra.storage_class_name`.
   O namespace não é mais criado por este repositório — cada repositório consumidor cria
   o próprio namespace `tech-challenge`.
-
-## Publicando a imagem no ECR
-
-O repositório ECR é provisionado aqui, segue um exemplo de como subir uma imagem:
-
-```bash
-REPO=$(terraform -chdir=infra output -raw ecr_repository_url)
-
-docker build --platform linux/amd64 -t "$REPO:$GIT_SHA" .
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin "$REPO"
-docker push "$REPO:$GIT_SHA"
-```
 
 ---
 

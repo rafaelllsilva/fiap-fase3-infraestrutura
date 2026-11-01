@@ -2,7 +2,7 @@
 # Providers AWS e Kubernetes
 # =============================================================================
 #
-# - aws: provisiona VPC, EKS, node group e ECR.
+# - aws: provisiona VPC, EKS, node group.
 # - kubernetes: cria os recursos de cluster compartilhados deste módulo —
 #   kubernetes_namespace_v1.this e kubernetes_storage_class_v1.ebs_gp3 (main.tf).
 #   Autentica via exec plugin (`aws eks get-token`).
