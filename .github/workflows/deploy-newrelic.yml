@@ -6,10 +6,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: deploy-newrelic
+  cancel-in-progress: false
+
 env:
   AWS_REGION: us-east-1
   EKS_CLUSTER_NAME: tech-challenge
   NEW_RELIC_NAMESPACE: newrelic
+  WORKLOAD_NAMESPACE: tech-challenge
   HELM_VERSION: v3.16.4
   NRI_BUNDLE_VERSION: 8.0.22
 
@@ -63,7 +68,7 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - name: Criar namespace e Secret do New Relic
+      - name: Criar namespaces e atualizar Secrets do New Relic
         run: |
           if [ -z "$NEW_RELIC_LICENSE_KEY" ]; then
             echo "::error::O secret NEW_RELIC_LICENSE_KEY não está configurado no Environment prod."
@@ -71,12 +76,15 @@ jobs:
           fi
 
           kubectl create namespace "$NEW_RELIC_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace "$WORKLOAD_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
           kubectl -n "$NEW_RELIC_NAMESPACE" create secret generic newrelic-license \
             --from-literal=licenseKey="$NEW_RELIC_LICENSE_KEY" \
             --dry-run=client -o yaml | kubectl apply -f -
-          kubectl -n "$NEW_RELIC_NAMESPACE" create secret generic newrelic-key-secret \
-            --from-literal=new_relic_license_key="$NEW_RELIC_LICENSE_KEY" \
-            --dry-run=client -o yaml | kubectl apply -f -
+          for namespace in "$NEW_RELIC_NAMESPACE" "$WORKLOAD_NAMESPACE"; do
+            kubectl -n "$namespace" create secret generic newrelic-key-secret \
+              --from-literal=new_relic_license_key="$NEW_RELIC_LICENSE_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          done
 
       - name: Instalar ou atualizar o New Relic bundle
         run: |
@@ -112,8 +120,9 @@ jobs:
 
       - name: Aplicar auto-attach Java
         run: |
+          kubectl wait --for=condition=Established crd/instrumentations.newrelic.com --timeout=2m
+          kubectl apply --dry-run=server -f k8s/newrelic/instrumentation.yaml
           kubectl apply -f k8s/newrelic/instrumentation.yaml
-          kubectl delete secret newrelic-key-secret -n tech-challenge --ignore-not-found
 
       - name: Validar instalação
         run: |
