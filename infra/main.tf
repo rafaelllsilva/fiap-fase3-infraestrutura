@@ -226,9 +226,11 @@ resource "aws_launch_template" "node" {
     device_name = "/dev/xvda"
 
     ebs {
-      volume_size           = 20
-      volume_type           = "gp3"
-      encrypted             = true
+      volume_size = 20
+      volume_type = "gp3"
+      # Sem criptografia: no AWS Academy o launch com EBS criptografado (chave aws/ebs) falha
+      # com "Client.InternalError: Client error on launch" e o node group fica sem nós.
+      encrypted             = false
       delete_on_termination = true
     }
   }
