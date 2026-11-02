@@ -118,27 +118,3 @@ output "private_subnet_ids" {
   value       = module.vpc.private_subnets
   description = "IDs das subnets privadas da VPC (onde os nós do EKS são provisionados)."
 }
-
-# ---------------------------------------------------------------------------
-# ECR
-# ---------------------------------------------------------------------------
-
-output "ecr_repository_url" {
-  value       = aws_ecr_repository.this.repository_url
-  description = "URL do repositório ECR. A pipeline do repositório da aplicação publica a imagem aqui (`docker push <url>:<tag>`) e referencia a mesma URL no campo image do Deployment."
-}
-
-output "ecr_repository_name" {
-  value       = aws_ecr_repository.this.name
-  description = "Nome do repositório ECR (para comandos `aws ecr` como describe-images e batch-get-image)."
-}
-
-output "ecr_repository_arn" {
-  value       = aws_ecr_repository.this.arn
-  description = "ARN do repositório ECR, para uso em policies IAM."
-}
-
-output "ecr_registry_id" {
-  value       = aws_ecr_repository.this.registry_id
-  description = "ID do registry ECR (conta AWS dona do repositório), usado em `aws ecr get-login-password --registry-ids`."
-}

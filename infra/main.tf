@@ -1,5 +1,5 @@
 # Provisiona a infraestrutura: VPC, cluster EKS com addons, managed
-# node group, repositório ECR e as capacidades de cluster compartilhadas
+# node group e as capacidades de cluster compartilhadas
 # (namespace, StorageClass default).
 #
 # Este módulo NÃO implanta banco de dados nem aplicação. Esses componentes têm
@@ -226,9 +226,11 @@ resource "aws_launch_template" "node" {
     device_name = "/dev/xvda"
 
     ebs {
-      volume_size           = 20
-      volume_type           = "gp3"
-      encrypted             = true
+      volume_size = 20
+      volume_type = "gp3"
+      # Sem criptografia: no AWS Academy o launch com EBS criptografado (chave aws/ebs) falha
+      # com "Client.InternalError: Client error on launch" e o node group fica sem nós.
+      encrypted             = false
       delete_on_termination = true
     }
   }
@@ -294,30 +296,7 @@ resource "aws_eks_node_group" "this" {
 }
 
 # ---------------------------------------------------------------------------
-# 4. Repositório ECR
-# ---------------------------------------------------------------------------
-resource "aws_ecr_repository" "this" {
-  name                 = var.ecr_repository_name
-  image_tag_mutability = "MUTABLE"
-
-  # O repositório é apenas provisionado aqui; o build e o push da imagem são
-  # feitos pela pipeline do repositório da app, que consome o output
-  # `ecr_repository_url`. force_delete permite destruir o repo com imagens dentro.
-  force_delete = true
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  tags = {
-    Environment = var.environment
-    ManagedBy   = "Terraform"
-    Project     = var.project_name
-  }
-}
-
-# ---------------------------------------------------------------------------
-# 5. Recursos compartilhados no cluster
+# 4. Recursos compartilhados no cluster
 # ---------------------------------------------------------------------------
 # --- Access entries adicionais ---------------------------------------------
 resource "aws_eks_access_entry" "admin" {

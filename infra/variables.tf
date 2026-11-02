@@ -5,7 +5,7 @@
 variable "aws_region" {
   type        = string
   default     = "us-east-1"
-  description = "Região AWS onde a infraestrutura (VPC, EKS, ECR) será provisionada."
+  description = "Região AWS onde a infraestrutura (VPC, EKS) será provisionada."
 }
 
 variable "environment" {
@@ -87,24 +87,8 @@ variable "node_desired_size" {
 }
 
 # ---------------------------------------------------------------------------
-# ECR
-# ---------------------------------------------------------------------------
-
-variable "ecr_repository_name" {
-  type        = string
-  default     = "tech-challenge-app"
-  description = "Nome do repositório ECR onde a imagem Docker da aplicação é publicada. Este módulo apenas provisiona o repositório: o build e o push são feitos pela pipeline do repositório da aplicação, que consome o output `ecr_repository_url`."
-}
-
-# ---------------------------------------------------------------------------
 # Recursos compartilhados no cluster
 # ---------------------------------------------------------------------------
-
-variable "namespace" {
-  type        = string
-  default     = "tech-challenge"
-  description = "Namespace Kubernetes compartilhado, criado por este módulo (kubernetes_namespace_v1.this) e consumido pelos repositórios de banco de dados e de aplicação através do output `namespace`. Criado aqui porque nenhum dos dois repositórios pode ser dono dele sem conflitar com o outro."
-}
 
 variable "cluster_admin_role_arns" {
   type        = list(string)

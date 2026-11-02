@@ -27,7 +27,7 @@ spec:
     matchExpressions:
       - key: "kubernetes.io/metadata.name"
         operator: "In"
-        values: ["tech-challenge"]
+        values: ["os-service"]
 
   podLabelSelector:
     matchExpressions:
