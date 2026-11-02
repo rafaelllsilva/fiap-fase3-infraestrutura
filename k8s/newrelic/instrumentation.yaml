@@ -43,3 +43,48 @@ spec:
         - key: "container"
           operator: "In"
           values: ["execution-service"]
+---
+apiVersion: newrelic.com/v1beta2
+kind: Instrumentation
+metadata:
+  name: newrelic-instrumentation-os-service
+  namespace: newrelic
+spec:
+  licenseKeySecret: newrelic-key-secret
+  agent:
+    language: java
+
+    image: newrelic/newrelic-java-init:9.4.0@sha256:f98d055a40a57a1fe3c21cb536a738c30862b5b204acb4afd8886e434dc30818
+    env:
+      - name: NEW_RELIC_APP_NAME
+        value: os-service
+      - name: NEW_RELIC_DISTRIBUTED_TRACING_ENABLED
+        value: "true"
+      - name: NEW_RELIC_APPLICATION_LOGGING_ENABLED
+        value: "true"
+      - name: NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED
+        value: "false"
+      - name: NEW_RELIC_APPLICATION_LOGGING_LOCAL_DECORATING_ENABLED
+        value: "true"
+
+  # Restringir a instrumentação ao workload do os-service (um Instrumentation por serviço,
+  # porque cada um precisa do seu NEW_RELIC_APP_NAME).
+  namespaceLabelSelector:
+    matchExpressions:
+      - key: "kubernetes.io/metadata.name"
+        operator: "In"
+        values: ["os-service"]
+
+  podLabelSelector:
+    matchExpressions:
+      - key: "app"
+        operator: "In"
+        values: ["os-service"]
+
+  containerSelector:
+    envSelector: {}
+    nameSelector:
+      matchExpressions:
+        - key: "container"
+          operator: "In"
+          values: ["os-service"]
