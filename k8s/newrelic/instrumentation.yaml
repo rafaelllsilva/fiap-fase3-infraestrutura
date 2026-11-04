@@ -4,7 +4,7 @@ metadata:
   name: newrelic-instrumentation
   namespace: newrelic
 spec:
-  # A workflow mantém esta chave nos namespaces newrelic e tech-challenge.
+  # A workflow mantém esta chave em newrelic, tech-challenge e os-service.
   licenseKeySecret: newrelic-key-secret
   agent:
     language: java
@@ -27,7 +27,7 @@ spec:
     matchExpressions:
       - key: "kubernetes.io/metadata.name"
         operator: "In"
-        values: ["os-service"]
+        values: ["tech-challenge"]
 
   podLabelSelector:
     matchExpressions:

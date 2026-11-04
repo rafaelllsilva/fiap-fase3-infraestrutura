@@ -1,6 +1,6 @@
 # Observabilidade - Tech Challenge Fase 3
 
-> **Referência histórica da Fase 3.** Para o workload atual, use o [roteiro de validação do execution-service](validacao-execution.md). O manifest de instrumentação agora seleciona `execution-service`; nomes de aplicação, seletores e exemplos do monólito abaixo não são o procedimento vigente da Fase 4.
+> **Referência histórica da Fase 3.** Para a Fase 4, use o [roteiro de validação de execution e OS](validacao-execution.md). O manifest contém configurações próprias para `execution-service` no namespace `tech-challenge` e `os-service` no namespace `os-service`. Nomes, seletores e procedimentos do monólito abaixo são históricos.
 
 Este documento descreve a observabilidade do ambiente de produção do Tech Challenge Fase 3: Amazon EKS `tech-challenge`, aplicacao Spring Boot e PostgreSQL no namespace `tech-challenge`.
 

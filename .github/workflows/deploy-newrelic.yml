@@ -15,6 +15,7 @@ env:
   EKS_CLUSTER_NAME: tech-challenge
   NEW_RELIC_NAMESPACE: newrelic
   WORKLOAD_NAMESPACE: tech-challenge
+  OS_WORKLOAD_NAMESPACE: os-service
   HELM_VERSION: v3.16.4
   NRI_BUNDLE_VERSION: 8.0.22
 
@@ -77,10 +78,11 @@ jobs:
 
           kubectl create namespace "$NEW_RELIC_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
           kubectl create namespace "$WORKLOAD_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace "$OS_WORKLOAD_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
           kubectl -n "$NEW_RELIC_NAMESPACE" create secret generic newrelic-license \
             --from-literal=licenseKey="$NEW_RELIC_LICENSE_KEY" \
             --dry-run=client -o yaml | kubectl apply -f -
-          for namespace in "$NEW_RELIC_NAMESPACE" "$WORKLOAD_NAMESPACE"; do
+          for namespace in "$NEW_RELIC_NAMESPACE" "$WORKLOAD_NAMESPACE" "$OS_WORKLOAD_NAMESPACE"; do
             kubectl -n "$namespace" create secret generic newrelic-key-secret \
               --from-literal=new_relic_license_key="$NEW_RELIC_LICENSE_KEY" \
               --dry-run=client -o yaml | kubectl apply -f -
