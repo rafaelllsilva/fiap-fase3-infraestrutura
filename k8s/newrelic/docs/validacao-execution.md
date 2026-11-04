@@ -17,6 +17,8 @@ Roteiro para conferir agente Java, APM e logs no EKS. A configuração do billin
 
 O namespace selecionado deve corresponder ao deployment, mesmo quando seu nome difere do serviço.
 
+A etapa **Validar instalação** acompanha o rollout dos Deployments, DaemonSets e StatefulSets do bundle, sem esperar pods antigos já encerrados com falha. Se algum componente atual não estabilizar, o workflow falha e imprime nodes, pods e eventos para diagnóstico.
+
 ## 2. Conferir saúde e injeção
 
 Com AWS CLI e kubectl autenticados, escolher um serviço. Repetir o roteiro para o outro:
