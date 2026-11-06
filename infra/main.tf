@@ -266,6 +266,9 @@ resource "aws_eks_node_group" "this" {
   # Amarra a versão do kubelet à do control plane
   version = var.kubernetes_version
 
+  # AMI fixada (e não a "recommended" mais recente) — ver var.node_ami_release_version
+  release_version = var.node_ami_release_version
+
   instance_types = [var.node_instance_type]
   ami_type       = "AL2023_x86_64_STANDARD"
   capacity_type  = "ON_DEMAND"

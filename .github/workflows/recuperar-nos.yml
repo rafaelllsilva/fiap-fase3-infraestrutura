@@ -1,0 +1,55 @@
+# Recupera o node group quando os nós não ficam Ready (AWS Academy: instâncias substitutas nascem sem sessão válida).
+name: Recuperar Nós do EKS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-infra-state
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: tech-challenge
+
+jobs:
+  recuperar:
+    runs-on: ubuntu-latest
+    environment: prod
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # Credenciais de sessão do AWS Academy Lab (secret único, 3 chaves)
+      - name: Extrair credenciais AWS
+        id: aws_creds
+        env:
+          AWS_CREDENTIALS: ${{ secrets.AWS_CREDENTIALS }}
+        run: |
+          access_key_id=$(grep '^aws_access_key_id=' <<< "$AWS_CREDENTIALS" | cut -d= -f2-)
+          secret_access_key=$(grep '^aws_secret_access_key=' <<< "$AWS_CREDENTIALS" | cut -d= -f2-)
+          session_token=$(grep '^aws_session_token=' <<< "$AWS_CREDENTIALS" | cut -d= -f2-)
+          echo "::add-mask::$access_key_id"
+          echo "::add-mask::$secret_access_key"
+          echo "::add-mask::$session_token"
+          {
+            echo "access_key_id=$access_key_id"
+            echo "secret_access_key=$secret_access_key"
+            echo "session_token=$session_token"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ steps.aws_creds.outputs.access_key_id }}
+          aws-secret-access-key: ${{ steps.aws_creds.outputs.secret_access_key }}
+          aws-session-token: ${{ steps.aws_creds.outputs.session_token }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configurar acesso ao EKS
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
+
+      - name: Garantir nós Ready
+        run: bash infra/script-recuperar-nos.sh "$EKS_CLUSTER_NAME" "$AWS_REGION"

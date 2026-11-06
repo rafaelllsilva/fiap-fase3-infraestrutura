@@ -190,6 +190,9 @@ Com o port forward aberto, a API fica acessível na rota `http://localhost:8080`
 | `terraform-plan.yml` | Abertura de pull request para a `main`, ou manual | `fmt -check`, `init`, `validate`, `plan` |
 | `terraform-apply.yml` | Merge de pull request na `main`, ou manual | `init`, `apply -auto-approve`, `output` |
 | `terraform-destroy.yml` | só manual | exige a palavra `destroy` digitada, depois `destroy -auto-approve` |
+| `recuperar-nos.yml` | só manual | se o cluster não tem nós `Ready`, termina as instâncias do node group que não se registraram para o ASG lançar novas (`infra/script-recuperar-nos.sh`) |
+
+> **Quando usar o `recuperar-nos.yml`:** no AWS Academy, quando a sessão do lab expira as instâncias do node group são paradas e o ASG lança substitutas sem sessão válida. A SCP nega `ec2:DescribeInstances` à `LabRole`, o `nodeadm` falha, nenhum nó fica `Ready` e os pods dos consumidores ficam `Pending`. Atualize o secret `AWS_CREDENTIALS` com a sessão nova e dispare este workflow antes de qualquer deploy.
 
 As pipelines dependem de 2 secrets:
 - `AWS_CREDENTIALS`: contém as credenciais necessárias da AWS. Elas extraem as informações do secret e criam estas 3 variáveis em tempo de execução:

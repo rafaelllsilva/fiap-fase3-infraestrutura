@@ -68,6 +68,12 @@ variable "node_instance_type" {
   description = "Tipo de instância EC2 usado pelo managed node group do EKS. t3.medium oferece 2 vCPU e 4 GiB de memória por nó, capacidade adequada para as réplicas da aplicação, os addons do EKS e o agente do New Relic."
 }
 
+variable "node_ami_release_version" {
+  type        = string
+  default     = "1.36.2-20260801"
+  description = "Release da AMI EKS-optimized (AL2023) do managed node group, no formato <versão do k8s>-<data>. Fixada numa AMI de agosto/2026 porque, com a AMI mais recente (1.36.5-20261031), os nós subiam mas o nodeadm travava em ec2:DescribeInstances (negado por SCP no Learner Lab) e nunca entravam no cluster. O prefixo (1.36) precisa acompanhar var.kubernetes_version. Liste as releases com: aws ec2 describe-images --owners amazon --filters Name=name,Values=amazon-eks-node-al2023-x86_64-standard-<versão>-*. Use null para voltar à AMI recomendada."
+}
+
 variable "node_min_size" {
   type        = number
   default     = 3
