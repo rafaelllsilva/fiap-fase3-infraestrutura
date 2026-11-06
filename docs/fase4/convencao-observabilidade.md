@@ -39,7 +39,9 @@ Registrar transições após commit, eventos processados/duplicados, falhas de p
 
 O execution já registra `orderId`, transições e falhas em JSON. Para correlacioná-lo com os demais, pesquisar `correlationId = '10'` **ou** `orderId = 10`. Sua identidade é obtida pelos metadados de Kubernetes/APM. Não exigir novos campos de log no execution para esta integração.
 
-Infra configura entidades APM separadas: `os-service`, `billing-service` e `execution-service`, usando os rótulos/contêineres correspondentes no namespace `tech-challenge`. A seleção antiga de `tech-challenge-app` será substituída.
+Infra mantém uma configuração `Instrumentation` por serviço, com nome APM, rótulo `app` e contêiner correspondentes. O execution usa o namespace `tech-challenge`; o OS usa `os-service`. O billing terá sua configuração incluída junto de seu deployment. A instrumentação atual substitui a seleção antiga de `tech-challenge-app`.
+
+O workflow **Deploy New Relic** atualiza a chave em `newrelic`, `tech-challenge` e `os-service`. Depois de instalar o agente ou trocar a chave, recriar os pods afetados pelo fluxo de deploy de cada serviço. Seguir o [roteiro de validação de execution e OS](../../k8s/newrelic/docs/validacao-execution.md).
 
 Manter a coleta por stdout no coletor Kubernetes e evitar encaminhamento duplicado pelo agente Java. Validar a auto-instrumentação nos pods e na passagem por SQS/outbox. `correlationId` liga a jornada de negócio; uma OS pode atravessar vários traces. A evidência deve mostrar os trechos realmente capturados pelo agente, sem presumir continuidade automática.
 
