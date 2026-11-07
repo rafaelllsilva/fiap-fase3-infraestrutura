@@ -32,7 +32,7 @@ node group, além do recurso de cluster compartilhado StorageClass.
 - Recursos compartilhados de cluster: cria a StorageClass `gp3` default e os addons
   que os workloads dependem (`aws-ebs-csi-driver` para PersistentVolumeClaims,
   `metrics-server` para HPA).
-- Mensageria compartilhada dos serviços da Fase 4 (os-service, billing-service e execution-service): tópicos SNS, filas SQS com DLQs e as assinaturas entre eles (`infra/mensageria.tf`, tabela abaixo).
+- Mensageria compartilhada dos serviços da Fase 4 (os-service, billing-service e execution-service): filas SQS (uma por tipo de evento) com suas DLQs (`infra/mensageria.tf`, tabela abaixo).
 - Registro de imagens: **não** é provisionado aqui — cada serviço cria o próprio repositório Amazon ECR conforme necessário.
 
 ## Tecnologias
@@ -52,7 +52,7 @@ infra/
 ├── backend.tf      bloco terraform{} — backend "s3"
 ├── providers.tf    providers aws e kubernetes
 ├── main.tf         VPC, EKS + addons, node group, StorageClass
-├── mensageria.tf   tópicos SNS, filas SQS, DLQs e assinaturas dos 3 serviços
+├── mensageria.tf   filas SQS e DLQs dos 3 serviços
 ├── variables.tf    input variables
 └── outputs.tf      contrato de integração com os outros repositórios
 script-criar-backend.sh   bootstrap idempotente do bucket S3 do state (CI + uso manual)
@@ -218,17 +218,31 @@ As pipelines dependem de 2 secrets:
 
 Os outputs de `infra/outputs.tf` expõe os ids dos recursos provisionados por este repositório para que os outros repositórios possam fazer a devida integração com o cluster Kubernetes e seus recursos.
 
-### Mensageria (SNS/SQS)
+### Mensageria (SQS)
 
-Cada serviço publica no seu tópico e consome uma fila por serviço de origem. Cada fila tem uma DLQ (`<fila>-dlq`, retenção de 14 dias, `maxReceiveCount` = `var.max_receive_count`) e só aceita mensagens do tópico de origem. As assinaturas usam `raw_message_delivery = true` (o consumidor lê o envelope JSON direto, sem o wrapper do SNS).
+Os serviços publicam direto nas filas (sem SNS) e cada serviço consome uma fila por tipo de evento, nomeada `<consumidor>-<evento>`. Cada fila tem uma DLQ (`<fila>-dlq`, retenção de 14 dias, `maxReceiveCount` = `var.max_receive_count`, default 5). Não há queue policy: o acesso é por IAM (role dos nós, mesma conta).
 
-| Tópico (quem publica) | Filas assinadas (quem consome) |
-| --- | --- |
-| `os-events` (os-service) | `billing-service-os-events`, `execution-service-os-events` |
-| `billing-events` (billing-service) | `os-service-billing-events`, `execution-service-billing-events` |
-| `execution-events` (execution-service) | `os-service-execution-events`, `billing-service-execution-events` |
+| Consumidor | Evento | Publicado por | Fila |
+| --- | --- | --- | --- |
+| execution | `OS_CRIADA` | os-service | `execution-os-criada` |
+| execution | `PAGAMENTO_CONFIRMADO` | billing-service | `execution-pagamento-confirmado` |
+| execution | `OS_CANCELADA` | os-service | `execution-os-cancelada` |
+| execution | `PAGAMENTO_ESTORNADO` | billing-service | `execution-pagamento-estornado` |
+| billing | `DIAGNOSTICO_CONCLUIDO` | execution-service | `billing-diagnostico-concluido` |
+| billing | `ORCAMENTO_APROVADO` | os-service | `billing-orcamento-aprovado` |
+| billing | `EXECUCAO_FALHOU` | execution-service | `billing-execucao-falhou` |
+| billing | `OS_CANCELADA` | os-service | `billing-os-cancelada` |
+| os | `ORCAMENTO_GERADO` | billing-service | `os-orcamento-gerado` |
+| os | `PAGAMENTO_CONFIRMADO` | billing-service | `os-pagamento-confirmado` |
+| os | `PAGAMENTO_FALHOU` | billing-service | `os-pagamento-falhou` |
+| os | `PAGAMENTO_ESTORNADO` | billing-service | `os-pagamento-estornado` |
+| os | `DIAGNOSTICO_CONCLUIDO` | execution-service | `os-diagnostico-concluido` |
+| os | `ESTOQUE_RESERVADO` | execution-service | `os-estoque-reservado` |
+| os | `EXECUCAO_INICIADA` | execution-service | `os-execucao-iniciada` |
+| os | `EXECUCAO_FINALIZADA` | execution-service | `os-execucao-finalizada` |
+| os | `EXECUCAO_FALHOU` | execution-service | `os-execucao-falhou` |
 
-Os nomes são o contrato com os serviços (variáveis de ambiente dos ConfigMaps). As URLs e ARNs saem nos outputs `topicos_eventos_arn`, `filas_url` e `dlqs_url`. Os serviços **não** devem criar esses tópicos e filas: os nomes colidiriam com os daqui. Aplique este repositório antes de subir os serviços, que não iniciam sem as filas (`queue-not-found-strategy=fail`). O `destroy` deste repositório apaga a mensageria de todos os serviços.
+Os nomes são o contrato com os serviços (variáveis de ambiente dos ConfigMaps). As URLs saem nos outputs `filas_url` e `dlqs_url`, chaveados pelo nome da fila. Os serviços **não** devem criar esses tópicos e filas: os nomes colidiriam com os daqui. Aplique este repositório antes de subir os serviços, que não iniciam sem as filas (`queue-not-found-strategy=fail`). O `destroy` deste repositório apaga a mensageria de todos os serviços.
 
 ## Documentações
 
