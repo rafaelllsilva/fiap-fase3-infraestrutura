@@ -101,3 +101,13 @@ variable "cluster_admin_role_arns" {
   default     = []
   description = "ARNs de IAM roles que recebem acesso admin ao cluster via EKS Access Entries, além do principal que criou o cluster (já coberto por bootstrap_cluster_creator_admin_permissions). O default vazio basta no AWS Academy Learner Lab, onde todos os pipelines usam a mesma role de sessão; fora do lab, use para dar acesso às roles de CI dos repositórios de app e banco."
 }
+
+# ---------------------------------------------------------------------------
+# Mensageria (SNS/SQS)
+# ---------------------------------------------------------------------------
+
+variable "max_receive_count" {
+  type        = number
+  default     = 5
+  description = "Quantas vezes uma mensagem é entregue a uma fila antes de ir para a DLQ."
+}

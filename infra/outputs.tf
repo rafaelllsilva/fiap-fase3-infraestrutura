@@ -118,3 +118,22 @@ output "private_subnet_ids" {
   value       = module.vpc.private_subnets
   description = "IDs das subnets privadas da VPC (onde os nós do EKS são provisionados)."
 }
+
+# ---------------------------------------------------------------------------
+# Mensageria (SNS/SQS)
+# ---------------------------------------------------------------------------
+
+output "topicos_eventos_arn" {
+  value       = { for servico, topico in aws_sns_topic.eventos : servico => topico.arn }
+  description = "ARN do tópico de eventos de cada serviço (chaves: os, billing, execution). Cada serviço publica apenas no seu."
+}
+
+output "filas_url" {
+  value       = { for chave, fila in aws_sqs_queue.fila : chave => fila.url }
+  description = "URL das filas, por <consumidor>_<origem> (ex.: os_billing = os-service-billing-events). Cada serviço consome só as suas duas filas."
+}
+
+output "dlqs_url" {
+  value       = { for chave, fila in aws_sqs_queue.dlq : chave => fila.url }
+  description = "URL das DLQs, com as mesmas chaves de filas_url."
+}
