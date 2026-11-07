@@ -32,6 +32,7 @@ node group, além do recurso de cluster compartilhado StorageClass.
 - Recursos compartilhados de cluster: cria a StorageClass `gp3` default e os addons
   que os workloads dependem (`aws-ebs-csi-driver` para PersistentVolumeClaims,
   `metrics-server` para HPA).
+- Mensageria compartilhada dos serviços da Fase 4 (os-service, billing-service e execution-service): tópicos SNS, filas SQS com DLQs e as assinaturas entre eles (`infra/mensageria.tf`, tabela abaixo).
 - Registro de imagens: **não** é provisionado aqui — cada serviço cria o próprio repositório Amazon ECR conforme necessário.
 
 ## Tecnologias
@@ -51,6 +52,7 @@ infra/
 ├── backend.tf      bloco terraform{} — backend "s3"
 ├── providers.tf    providers aws e kubernetes
 ├── main.tf         VPC, EKS + addons, node group, StorageClass
+├── mensageria.tf   tópicos SNS, filas SQS, DLQs e assinaturas dos 3 serviços
 ├── variables.tf    input variables
 └── outputs.tf      contrato de integração com os outros repositórios
 script-criar-backend.sh   bootstrap idempotente do bucket S3 do state (CI + uso manual)
@@ -215,6 +217,18 @@ As pipelines dependem de 2 secrets:
 ## Integração com os outros repositórios
 
 Os outputs de `infra/outputs.tf` expõe os ids dos recursos provisionados por este repositório para que os outros repositórios possam fazer a devida integração com o cluster Kubernetes e seus recursos.
+
+### Mensageria (SNS/SQS)
+
+Cada serviço publica no seu tópico e consome uma fila por serviço de origem. Cada fila tem uma DLQ (`<fila>-dlq`, retenção de 14 dias, `maxReceiveCount` = `var.max_receive_count`) e só aceita mensagens do tópico de origem. As assinaturas usam `raw_message_delivery = true` (o consumidor lê o envelope JSON direto, sem o wrapper do SNS).
+
+| Tópico (quem publica) | Filas assinadas (quem consome) |
+| --- | --- |
+| `os-events` (os-service) | `billing-service-os-events`, `execution-service-os-events` |
+| `billing-events` (billing-service) | `os-service-billing-events`, `execution-service-billing-events` |
+| `execution-events` (execution-service) | `os-service-execution-events`, `billing-service-execution-events` |
+
+Os nomes são o contrato com os serviços (variáveis de ambiente dos ConfigMaps). As URLs e ARNs saem nos outputs `topicos_eventos_arn`, `filas_url` e `dlqs_url`. Os serviços **não** devem criar esses tópicos e filas: os nomes colidiriam com os daqui. Aplique este repositório antes de subir os serviços, que não iniciam sem as filas (`queue-not-found-strategy=fail`). O `destroy` deste repositório apaga a mensageria de todos os serviços.
 
 ## Documentações
 
