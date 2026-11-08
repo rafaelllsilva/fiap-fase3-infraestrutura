@@ -230,6 +230,14 @@ Cada serviço publica no seu tópico e consome uma fila por serviço de origem. 
 
 Os nomes são o contrato com os serviços (variáveis de ambiente dos ConfigMaps). As URLs e ARNs saem nos outputs `topicos_eventos_arn`, `filas_url` e `dlqs_url`. Os serviços **não** devem criar esses tópicos e filas: os nomes colidiriam com os daqui. Aplique este repositório antes de subir os serviços, que não iniciam sem as filas (`queue-not-found-strategy=fail`). O `destroy` deste repositório apaga a mensageria de todos os serviços.
 
+Relação de tópico e filas por serviço:
+
+| Serviço | Tópico de envio | Filas consumidas |
+| --- | --- | --- |
+| `os-service` | `os-events` | `os-service-billing-events`, `os-service-execution-events` |
+| `billing-service` | `billing-events` | `billing-service-os-events`, `billing-service-execution-events` |
+| `execution-service` | `execution-events` | `execution-service-os-events`, `execution-service-billing-events` |
+
 ## Documentações
 
 As documentações do projeto se encontram no diretório **/docs**, e está organizado desta forma:
