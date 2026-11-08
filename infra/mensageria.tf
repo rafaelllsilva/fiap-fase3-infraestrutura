@@ -22,6 +22,7 @@ locals {
     # billing-service
     "billing-diagnostico-concluido", # DIAGNOSTICO_CONCLUIDO (execution-service)
     "billing-orcamento-aprovado",    # ORCAMENTO_APROVADO (os-service)
+    "billing-orcamento-rejeitado",   # ORCAMENTO_REJEITADO (os-service)
     "billing-execucao-falhou",       # EXECUCAO_FALHOU (execution-service)
     "billing-os-cancelada",          # OS_CANCELADA (os-service)
 
