@@ -120,12 +120,17 @@ output "private_subnet_ids" {
 }
 
 # ---------------------------------------------------------------------------
-# Mensageria (SQS)
+# Mensageria (SNS/SQS)
 # ---------------------------------------------------------------------------
 
+output "topicos_eventos_arn" {
+  value       = { for servico, topico in aws_sns_topic.eventos : servico => topico.arn }
+  description = "ARN do tópico de eventos de cada serviço (chaves: os, billing, execution). Cada serviço publica apenas no seu."
+}
+
 output "filas_url" {
-  value       = { for nome, fila in aws_sqs_queue.fila : nome => fila.url }
-  description = "URL das filas, por nome da fila (ex.: os-orcamento-gerado). Os serviços publicam direto na fila do consumidor; cada serviço consome só as filas com o seu prefixo (os-, billing-, execution-)."
+  value       = { for chave, fila in aws_sqs_queue.fila : chave => fila.url }
+  description = "URL das filas, por <consumidor>_<origem> (ex.: os_billing = os-service-billing-events). Cada serviço consome só as suas duas filas."
 }
 
 output "dlqs_url" {
