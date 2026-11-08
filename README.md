@@ -230,7 +230,6 @@ Os serviços publicam direto nas filas (sem SNS) e cada serviço consome uma fil
 | execution | `PAGAMENTO_ESTORNADO` | billing-service | `execution-pagamento-estornado` |
 | billing | `DIAGNOSTICO_CONCLUIDO` | execution-service | `billing-diagnostico-concluido` |
 | billing | `ORCAMENTO_APROVADO` | os-service | `billing-orcamento-aprovado` |
-| billing | `ORCAMENTO_REJEITADO` | os-service | `billing-orcamento-rejeitado` |
 | billing | `EXECUCAO_FALHOU` | execution-service | `billing-execucao-falhou` |
 | billing | `OS_CANCELADA` | os-service | `billing-os-cancelada` |
 | os | `ORCAMENTO_GERADO` | billing-service | `os-orcamento-gerado` |
