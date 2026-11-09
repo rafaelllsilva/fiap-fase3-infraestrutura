@@ -9,7 +9,8 @@ node group, além do recurso de cluster compartilhado StorageClass.
 ## Índice
 
 - [Validar execution e OS no New Relic](k8s/newrelic/docs/validacao-execution.md)
-- [Fase 4 — SAGA e observabilidade](docs/fase4/README.md)
+- [SAGA da ordem de serviço](docs/saga.md)
+- [Observabilidade dos três serviços](docs/convencao-observabilidade.md)
 - [Propósito](#propósito)
 - [Tecnologias](#tecnologias)
 - [Estrutura do repositório](#estrutura-do-repositório)

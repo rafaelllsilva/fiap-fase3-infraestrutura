@@ -41,7 +41,7 @@ O execution já registra `orderId`, transições e falhas em JSON. Para correlac
 
 Infra mantém uma configuração `Instrumentation` por serviço, com nome APM, rótulo `app` e contêiner correspondentes. O execution usa o namespace `tech-challenge`; o OS usa `os-service`. O billing terá sua configuração incluída junto de seu deployment. A instrumentação atual substitui a seleção antiga de `tech-challenge-app`.
 
-O workflow **Deploy New Relic** atualiza a chave em `newrelic`, `tech-challenge` e `os-service`. Depois de instalar o agente ou trocar a chave, recriar os pods afetados pelo fluxo de deploy de cada serviço. Seguir o [roteiro de validação de execution e OS](../../k8s/newrelic/docs/validacao-execution.md).
+O workflow **Deploy New Relic** atualiza a chave em `newrelic`, `tech-challenge` e `os-service`. Depois de instalar o agente ou trocar a chave, recriar os pods afetados pelo fluxo de deploy de cada serviço. Seguir o [roteiro de validação de execution e OS](../k8s/newrelic/docs/validacao-execution.md).
 
 Manter a coleta por stdout no coletor Kubernetes e evitar encaminhamento duplicado pelo agente Java. Validar a auto-instrumentação nos pods e na passagem por SQS/outbox. `correlationId` liga a jornada de negócio; uma OS pode atravessar vários traces. A evidência deve mostrar os trechos realmente capturados pelo agente, sem presumir continuidade automática.
 
@@ -52,6 +52,6 @@ A duração de transição no execution recebe zero fixo na versão revisada. Es
 - Três serviços visíveis no New Relic, cada um com seu nome.
 - Logs da mesma OS encontrados por correlação ou `orderId`.
 - Painel simples com saúde, erros e falhas da SAGA.
-- Evidências de sucesso e falha com estorno, incluindo logs da Lambda de roteamento.
+- Evidências de sucesso, cancelamento e falha com estorno, correlacionando logs de publicação e consumo conforme os [cenários de aceite](saga.md#cenários-de-aceite).
 
 A implementação e a coleta de evidências ainda serão executadas. Esta convenção define o trabalho e não declara uma integração já validada.
