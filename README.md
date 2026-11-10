@@ -8,7 +8,7 @@ node group, além do recurso de cluster compartilhado StorageClass.
 
 ## Índice
 
-- [Validar execution e OS no New Relic](k8s/newrelic/docs/validacao-execution.md)
+- [Validar os microsserviços no New Relic](k8s/newrelic/docs/validacao-execution.md)
 - [SAGA da ordem de serviço](docs/saga.md)
 - [Observabilidade dos três serviços](docs/convencao-observabilidade.md)
 - [Propósito](#propósito)
@@ -135,8 +135,8 @@ Regras que os repositórios consumidores seguem ao ler os outputs deste módulo:
 - **`key` distinta por repositório.** Todos usam o bucket `archtechs-infra-fase4`, mas cada root
   module precisa da própria chave como por exemplo: `database/terraform.tfstate`.
 - **Não recrie a StorageClass.** Ela é criada aqui; use `local.infra.storage_class_name`.
-  Cada repositório consumidor garante seu namespace: execution usa `tech-challenge` e OS usa
-  `os-service`. O workflow do New Relic também garante esses namespaces para atualizar a chave.
+  Cada repositório consumidor garante seu namespace. Execution e billing usam `tech-challenge`,
+  e o OS usa `os-service`. O workflow do New Relic também garante esses namespaces para atualizar a chave.
 
 ---
 

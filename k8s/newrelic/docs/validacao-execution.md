@@ -1,19 +1,20 @@
-# Validar execution e OS no New Relic
+# Validar os microsserviços no New Relic
 
-Roteiro para conferir agente Java, APM e logs no EKS. A configuração do billing será incluída junto de seu deployment; a SAGA integrada exige validação própria.
+Roteiro para conferir agente Java, APM e logs no EKS. A validação integrada da SAGA segue os [cenários de aceite](../../../docs/saga.md#cenários-de-aceite).
 
 ## 1. Instalar ou atualizar a instrumentação
 
 - Disponibilizar banco, mensageria e credenciais exigidos pelo deploy de cada serviço. O `JWT_SECRET` deve ser compatível com o emissor dos tokens.
 - Na infraestrutura, configurar os secrets `AWS_CREDENTIALS` vigente e `NEW_RELIC_LICENSE_KEY` do tipo **Ingest - License** no Environment `prod`.
 - Executar **Actions → Deploy New Relic → Run workflow** na branch com as correções. A execução antes do merge funciona porque esse workflow manual já existe na `main`; ela altera o mesmo ambiente EKS compartilhado.
-- O workflow instala o bundle `8.0.22`, aplica os dois recursos `Instrumentation` e atualiza a chave nos namespaces `newrelic`, `tech-challenge` e `os-service`. O agente Java permanece na versão `9.4.0`, fixado por digest.
+- O workflow instala o bundle `8.0.22`, aplica os três recursos `Instrumentation` e atualiza a chave nos namespaces `newrelic`, `tech-challenge` e `os-service`. O agente Java permanece na versão `9.4.0`, fixado por digest.
 - Depois, executar o CD de cada serviço que precisa receber o agente ou uma nova chave. O workflow da infraestrutura não reinicia aplicações. A atualização do Secret só chega às variáveis de ambiente quando os pods são recriados.
 
 | Serviço / nome APM | Namespace | Rótulo `app` / contêiner | Recurso `Instrumentation` em `newrelic` |
 |---|---|---|---|
 | `execution-service` | `tech-challenge` | `execution-service` | `newrelic-instrumentation` |
 | `os-service` | `os-service` | `os-service` | `newrelic-instrumentation-os-service` |
+| `billing-service` | `tech-challenge` | `billing-service` | `newrelic-instrumentation-billing-service` |
 
 O namespace selecionado deve corresponder ao deployment, mesmo quando seu nome difere do serviço.
 
@@ -21,12 +22,13 @@ A etapa **Validar instalação** acompanha o rollout dos Deployments, DaemonSets
 
 ## 2. Conferir saúde e injeção
 
-Com AWS CLI e kubectl autenticados, escolher um serviço. Repetir o roteiro para o outro:
+Com AWS CLI e kubectl autenticados, escolher um serviço. Repetir o roteiro para os demais:
 
 ```bash
 aws eks update-kubeconfig --region us-east-1 --name tech-challenge
 SERVICO=execution-service
 NAMESPACE=tech-challenge
+# Para validar o billing, usar SERVICO=billing-service no mesmo namespace.
 # Para validar o OS, usar SERVICO=os-service e NAMESPACE=os-service.
 
 kubectl rollout status deployment/"$SERVICO" -n "$NAMESPACE" --timeout=5m
@@ -36,7 +38,7 @@ kubectl get pods -n "$NAMESPACE" -l "app=$SERVICO" \
 kubectl get secret newrelic-key-secret -n "$NAMESPACE" -o name
 ```
 
-Todos os novos pods devem estar saudáveis e conter `nri-java--execution-service` ou `nri-java--os-service`, conforme o serviço. Ausência desse init container indica pod anterior à instrumentação ou seletor incompatível.
+Todos os novos pods devem estar saudáveis e conter `nri-java--<serviço>`, como `nri-java--billing-service` no billing. Ausência desse init container indica pod anterior à instrumentação ou seletor incompatível.
 
 Escolher um pod da lista e conferir somente variáveis não sensíveis:
 
@@ -75,7 +77,7 @@ Após alguns minutos, abrir **APM & Services** e conferir cada serviço. No Quer
 ```sql
 FROM Transaction
 SELECT count(*), average(duration)
-WHERE appName IN ('execution-service', 'os-service')
+WHERE appName IN ('execution-service', 'os-service', 'billing-service')
 FACET appName
 SINCE 30 minutes ago
 ```
@@ -85,7 +87,7 @@ Em Logs, filtrar pelo par namespace/contêiner da tabela. Confirmar os nomes dos
 ```sql
 FROM Log
 SELECT timestamp, level, message, orderId, correlationId
-WHERE (namespace_name = 'tech-challenge' AND container_name = 'execution-service')
+WHERE (namespace_name = 'tech-challenge' AND container_name IN ('execution-service', 'billing-service'))
    OR (namespace_name = 'os-service' AND container_name = 'os-service')
 SINCE 30 minutes ago
 LIMIT 100
