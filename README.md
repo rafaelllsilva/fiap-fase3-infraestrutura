@@ -2,15 +2,15 @@
 
 ## Introdução
 
-Infraestrutura do Tech Challenge Fase 3. O Terraform em `infra/` provisiona um
+Infraestrutura compartilhada de OS, billing e execution. O Terraform em `infra/` provisiona um
 cluster Kubernetes no Amazon EKS, VPC com subnets públicas/privadas, NAT Gateway, addons, managed
 node group, além do recurso de cluster compartilhado StorageClass.
 
 ## Índice
 
-- [Validar os microsserviços no New Relic](k8s/newrelic/docs/validacao-execution.md)
 - [SAGA da ordem de serviço](docs/saga.md)
-- [Observabilidade dos três serviços](docs/convencao-observabilidade.md)
+- [Convenção de observabilidade](docs/convencao-observabilidade.md)
+- [Validar os microsserviços no New Relic](k8s/newrelic/docs/validacao-execution.md)
 - [Propósito](#propósito)
 - [Tecnologias](#tecnologias)
 - [Estrutura do repositório](#estrutura-do-repositório)
@@ -21,6 +21,7 @@ node group, além do recurso de cluster compartilhado StorageClass.
 - [Diagnóstico do cluster](#diagnóstico-do-cluster)
 - [Conectar o kubectl ao cluster](#conectar-o-kubectl-ao-cluster)
 - [Pipeline no GitHub Actions](#pipeline-no-github-actions)
+- [Observabilidade](#observabilidade)
 - [Integração com os outros repositórios](#integração-com-os-outros-repositórios)
 - [Documentações do Projeto](#documentações)
 
@@ -33,12 +34,14 @@ node group, além do recurso de cluster compartilhado StorageClass.
 - Recursos compartilhados de cluster: cria a StorageClass `gp3` default e os addons
   que os workloads dependem (`aws-ebs-csi-driver` para PersistentVolumeClaims,
   `metrics-server` para HPA).
-- Mensageria compartilhada dos serviços da Fase 4 (os-service, billing-service e execution-service): tópicos SNS, filas SQS com DLQs e as assinaturas entre eles (`infra/mensageria.tf`, tabela abaixo).
+- Mensageria compartilhada dos microsserviços: tópicos SNS, filas SQS com DLQs e assinaturas (`infra/mensageria.tf`).
+- Observabilidade compartilhada: coleta de métricas, eventos e logs do Kubernetes e auto-instrumentação Java com New Relic (`k8s/newrelic/`).
 - Registro de imagens: **não** é provisionado aqui — cada serviço cria o próprio repositório Amazon ECR conforme necessário.
 
 ## Tecnologias
+
 - Kubernetes 1.36
-- Terraform 1.10.0
+- Terraform >= 1.10.0; workflows com 1.14.0
 - Componentes AWS:
   - EKS (cluster Kubernetes)
   - VPC (subnets públicas/privadas, Internet Gateway, NAT Gateway)
@@ -47,7 +50,9 @@ node group, além do recurso de cluster compartilhado StorageClass.
 ## Estrutura do repositório
 
 ```
-.github/workflows/  pipeline de plan, apply e destroy
+.github/workflows/  Terraform, recuperação dos nós e deploy do New Relic
+k8s/newrelic/      bundle e auto-instrumentação Java dos três serviços
+docs/             SAGA, convenção de observabilidade e arquitetura
 infra/
 ├── versions.tf     bloco terraform{} — required_version, required_providers
 ├── backend.tf      bloco terraform{} — backend "s3"
@@ -72,6 +77,7 @@ flowchart TB
   classDef dados   fill:#F0EAF6,stroke:#6A4A85,stroke-width:1.5px,color:#131A24
 
   ci["<b>GitHub Actions</b><br/><i>terraform-plan / apply / destroy</i>"]
+  cinr["<b>GitHub Actions</b><br/><i>Deploy New Relic</i>"]
 
   subgraph aws["CONTA AWS — AWS Academy Learner Lab · us-east-1"]
     direction TB
@@ -88,10 +94,10 @@ flowchart TB
       cp["<b>Control plane gerenciado</b><br/><i>API server · etcd · scheduler</i>"]
       addons["<b>Add-ons do cluster</b><br/>vpc-cni · kube-proxy · coredns<br/>aws-ebs-csi-driver · metrics-server"]
       ng["<b>Managed Node Group default</b><br/><i>t3.medium · ON_DEMAND · AL2023</i>"]
-      ns["<b>Namespace tech-challenge</b>"]
       sc["<b>StorageClass gp3</b><br/><i>default · ebs.csi.aws.com</i>"]
       nsnr["<b>Namespace newrelic</b>"]
-      nrbundle["<b>New Relic Bundle</b><br/><i>Agente APM</i>"]
+      nrbundle["<b>New Relic Bundle</b><br/><i>Métricas, eventos, logs e operador Java</i>"]
+      apm["<b>Instrumentation por serviço</b><br/><i>os-service · billing-service · execution-service</i>"]
     end
   end
 
@@ -102,13 +108,17 @@ flowchart TB
   net -->|"subnets"| ng
   cp  -->|"gerencia"| ng
   addons -->|"roda nos nós"| ng
-  class ci,consumidores externo
+  cinr -->|"instala e atualiza"| nrbundle
+  cinr -->|"aplica"| apm
+  nsnr --> nrbundle
+  class ci,cinr externo
   class net rede
-  class cp,addons,ng,ns,sc,nsnr,nrbundle k8s
+  class cp,addons,ng,sc,nsnr,nrbundle,apm k8s
   class state dados
 ```
 
 ## Pré-requisitos
+
 - Terraform: >= 1.10.0
 - kubectl: compatível com 1.36
 - AWS CLI: v2
@@ -135,8 +145,8 @@ Regras que os repositórios consumidores seguem ao ler os outputs deste módulo:
 - **`key` distinta por repositório.** Todos usam o bucket `archtechs-infra-fase4`, mas cada root
   module precisa da própria chave como por exemplo: `database/terraform.tfstate`.
 - **Não recrie a StorageClass.** Ela é criada aqui; use `local.infra.storage_class_name`.
-  Cada repositório consumidor garante seu namespace. Execution e billing usam `tech-challenge`,
-  e o OS usa `os-service`. O workflow do New Relic também garante esses namespaces para atualizar a chave.
+  Cada repositório consumidor garante o namespace de seus workloads.
+  Os seletores de auto-instrumentação estão em `k8s/newrelic/instrumentation.yaml`.
 
 ---
 
@@ -148,7 +158,6 @@ kubectl get pods -n kube-system
 kubectl get storageclass
 kubectl top nodes
 kubectl get events -A --sort-by=.lastTimestamp | tail -30
-kubectl port-forward -n tech-challenge service/spring-app-service 8080:80  # ver "Conectar o kubectl ao cluster"
 
 aws eks describe-nodegroup --cluster-name tech-challenge --nodegroup-name default --region us-east-1
 aws eks describe-addon --cluster-name tech-challenge --addon-name aws-ebs-csi-driver --region us-east-1
@@ -171,15 +180,15 @@ O mesmo comando sai pronto no output `configure_kubectl`.
 O `kubectl port-forward` abre um túnel entre uma porta da sua máquina e um Service (ou pod) do
 cluster — é o jeito de falar com a API sem depender do API Gateway.
 
-Os nomes vêm do repositório da aplicação, não deste; confira o que está publicado no namespace:
+Os nomes vêm do repositório da aplicação, não deste; confira os recursos publicados:
 
 ```bash
-kubectl get svc,deploy -n tech-challenge
+kubectl get deployment,service -A
 ```
 
 ```bash
-# Deployment da API: porta 8080 do container -> 8080 na máquina local
-kubectl port-forward -n tech-challenge deployment/tech-challenge-app 8080:8080
+# API do OS: porta 8080 do container -> 8080 na máquina local
+kubectl port-forward -n os-service deployment/os-service 8080:8080
 ```
 
 Com o port forward aberto, a API fica acessível na rota `http://localhost:8080`.
@@ -191,33 +200,41 @@ Com o port forward aberto, a API fica acessível na rota `http://localhost:8080`
 | Workflow | Dispara em | O que faz |
 | --- | --- | --- |
 | `terraform-plan.yml` | Abertura de pull request para a `main`, ou manual | `fmt -check`, `init`, `validate`, `plan` |
-| `terraform-apply.yml` | Merge de pull request na `main`, ou manual | `init`, `apply -auto-approve`, `output` |
+| `terraform-apply.yml` | Push na `main` com mudanças em `infra/**` ou nos workflows Terraform, ou manual | `init`, `apply -auto-approve`, `output` |
 | `terraform-destroy.yml` | só manual | exige a palavra `destroy` digitada, depois `destroy -auto-approve` |
-| `recuperar-nos.yml` | só manual | se o cluster não tem nós `Ready`, termina as instâncias do node group que não se registraram para o ASG lançar novas (`infra/script-recuperar-nos.sh`) |
+| `recuperar-nos.yml` | só manual | recupera instâncias do node group que não se registraram no cluster (`infra/script-recuperar-nos.sh`) |
+| `deploy-newrelic.yml` | só manual | atualiza os Secrets, instala o bundle Helm, aplica `Instrumentation` e valida os componentes |
 
-> **Quando usar o `recuperar-nos.yml`:** no AWS Academy, quando a sessão do lab expira as instâncias do node group são paradas e o ASG lança substitutas sem sessão válida. A SCP nega `ec2:DescribeInstances` à `LabRole`, o `nodeadm` falha, nenhum nó fica `Ready` e os pods dos consumidores ficam `Pending`. Atualize o secret `AWS_CREDENTIALS` com a sessão nova e dispare este workflow antes de qualquer deploy.
+Se o cluster estiver sem nós `Ready`, o workflow `recuperar-nos.yml` permite recuperar as instâncias que não se registraram. Ele usa as credenciais da sessão ativa da AWS.
 
-As pipelines dependem de 2 secrets:
-- `AWS_CREDENTIALS`: contém as credenciais necessárias da AWS. Elas extraem as informações do secret e criam estas 3 variáveis em tempo de execução:
-  - `AWS_ACCESS_KEY_ID`
-  - `AWS_SECRET_ACCESS_KEY`
-  - `AWS_SESSION_TOKEN`
-  
-  Segue um exemplo do conteúdo deste secret que deve ser seguido:
-  ```bash
-  aws_access_key_id=...
-  aws_secret_access_key=...
-  aws_session_token=...
-  ```
-- `NEW_RELIC_LICENSE_KEY`: chavem de licença do New Relic, ferramenta de APM utilizada no projeto.
+Os workflows usam o Environment **`prod`**, com os seguintes secrets:
 
-> Nota: As credenciais AWS expiram a cada 4 horas, portanto novas chaves devem ser criadas e atualizadas no secret sempre que for rodar a pipeline. Para fazer isso, basta reuniciar o lab do AWS Academy.
+| Secret | Uso |
+| --- | --- |
+| `AWS_CREDENTIALS` | Credenciais temporárias para acesso à AWS e ao EKS. |
+| `NEW_RELIC_LICENSE_KEY` | Chave de ingestão do New Relic usada pelo workflow de observabilidade. |
+
+Formato de `AWS_CREDENTIALS`:
+
+```text
+aws_access_key_id=...
+aws_secret_access_key=...
+aws_session_token=...
+```
+
+A pipeline extrai `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e `AWS_SESSION_TOKEN` desse conteúdo. As credenciais temporárias são substituídas no secret quando a sessão expira.
+
+## Observabilidade
+
+O workflow **Deploy New Relic** instala os coletores no namespace `newrelic` e aplica uma configuração Java por serviço. Os nomes no APM são `os-service`, `billing-service` e `execution-service`. Logs são coletados do stdout dos contêineres, enquanto o agente Java fornece transações, erros e traces.
+
+A instrumentação ocorre na criação dos pods. O workflow do New Relic valida seus próprios componentes; a saúde e a recriação dos pods de aplicação pertencem ao deploy de cada serviço. A correlação da jornada usa `correlationId`, `orderId` e `eventId`, conforme a [convenção de observabilidade](docs/convencao-observabilidade.md).
 
 ---
 
 ## Integração com os outros repositórios
 
-Os outputs de `infra/outputs.tf` expõe os ids dos recursos provisionados por este repositório para que os outros repositórios possam fazer a devida integração com o cluster Kubernetes e seus recursos.
+Os outputs de `infra/outputs.tf` expõem os identificadores dos recursos compartilhados para integração com os repositórios dos serviços e dos bancos de dados.
 
 ### Mensageria (SNS/SQS)
 
@@ -231,18 +248,15 @@ Cada serviço publica no seu tópico e consome uma fila por serviço de origem. 
 
 Os nomes são o contrato com os serviços (variáveis de ambiente dos ConfigMaps). As URLs e ARNs saem nos outputs `topicos_eventos_arn`, `filas_url` e `dlqs_url`. Os serviços **não** devem criar esses tópicos e filas: os nomes colidiriam com os daqui. Aplique este repositório antes de subir os serviços, que não iniciam sem as filas (`queue-not-found-strategy=fail`). O `destroy` deste repositório apaga a mensageria de todos os serviços.
 
-Relação de tópico e filas por serviço:
-
-| Serviço | Tópico de envio | Filas consumidas |
-| --- | --- | --- |
-| `os-service` | `os-events` | `os-service-billing-events`, `os-service-execution-events` |
-| `billing-service` | `billing-events` | `billing-service-os-events`, `billing-service-execution-events` |
-| `execution-service` | `execution-events` | `execution-service-os-events`, `execution-service-billing-events` |
+Os eventos que passam por cada fila, a justificativa da coreografia e as ações compensatórias estão na [SAGA da ordem de serviço](docs/saga.md).
 
 ## Documentações
 
-As documentações do projeto se encontram no diretório **/docs**, e está organizado desta forma:
-- [`ADR`](./docs/adr/): ADRs do projeto
+A documentação do projeto está organizada em:
+
+- [SAGA](docs/saga.md): participantes, tópicos, filas, eventos e compensações
+- [Convenção de observabilidade](docs/convencao-observabilidade.md): coleta, formatos de log e correlação
+- [`ADR`](./docs/adr/): decisões de arquitetura
 - [`Banco de Dados`](./docs/banco-de-dados/): Documentos do banco de dados (decisão e modelo de Entidade-Relacionamento)
 - [`C4`](./docs/c4/): Diagrama do C4 Model
 - [`RFC`](./docs/rfc/): RFCs do projeto

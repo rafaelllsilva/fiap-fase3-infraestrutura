@@ -1,57 +1,77 @@
-# Observabilidade dos três serviços
+# Convenção de observabilidade
 
-**Diretriz de implementação — 28/10/2026.**
+O projeto usa New Relic para acompanhar o cluster EKS `tech-challenge`, as APIs e o processamento de eventos de `os-service`, `billing-service` e `execution-service`.
 
-## Objetivo
+## Coleta e identificação
 
-Usar o New Relic da Fase 3 para identificar os serviços e acompanhar uma OS. A configuração central fica na infraestrutura. OS e billing adotam o padrão abaixo; o execution mantém seus logs atuais.
+As aplicações escrevem logs JSON no stdout. O New Relic Logging coleta esses registros dos contêineres. O agente Java fornece APM, traces e decoração local dos logs; seu encaminhamento próprio de logs fica desabilitado para evitar duplicação da coleta.
 
-## Padrão de logs
+Cada serviço tem um recurso `Instrumentation`, com `NEW_RELIC_APP_NAME` igual a `os-service`, `billing-service` ou `execution-service`. A seleção combina namespace, rótulo `app` e nome do contêiner, conforme [instrumentation.yaml](../k8s/newrelic/instrumentation.yaml). Os componentes de coleta ficam em [values.yaml](../k8s/newrelic/values.yaml).
 
-Manter JSON no console e mensagens legíveis em português brasileiro. Preservar as chaves técnicas já existentes.
+O workflow manual [Deploy New Relic](../.github/workflows/deploy-newrelic.yml) usa os secrets `AWS_CREDENTIALS` e `NEW_RELIC_LICENSE_KEY` do Environment `prod`. Ele instala o bundle e aplica a instrumentação. A chave de ingestão fica nos Secrets Kubernetes `newrelic-license` e `newrelic-key-secret`, conforme o componente que a utiliza. A injeção do agente ocorre na criação dos pods; a instalação do bundle não reinicia as aplicações.
 
-| Campo em OS e billing | Uso |
+Nos logs coletados do cluster, `container_name` identifica o serviço, `namespace_name` identifica o namespace e `cluster_name` identifica o cluster. No APM, a identificação é `appName`. As consultas de logs dos três serviços usam o nome do contêiner, sem presumir um namespace compartilhado.
+
+## Campos de correlação
+
+| Campo | Significado |
 |---|---|
-| `service` | `os-service` ou `billing-service`. |
-| `correlationId` | ID da OS como texto. |
-| `orderId` | ID da OS, compatível com o campo já usado no execution. |
-| `eventId` e `eventType` | Evento envolvido no processamento. |
-| `operation` e `outcome` | Ação e resultado. |
+| `service` ou `container_name` | Serviço de origem; `container_name` é acrescentado pela coleta Kubernetes. |
+| `correlationId` | ID da OS como texto, usado para reunir sua jornada. |
+| `orderId` | ID numérico da OS nos registros de negócio. |
+| `eventId` | UUID de um evento de integração, preservado nas reentregas. |
+| `sagaEventType` | Tipo do evento nos registros de SAGA emitidos por `OrdemDeServicoEventLogger` do OS. |
+| `operation` | Operação realizada, como recebimento, publicação ou processamento. |
+| `outcome` ou `result` | Resultado daquela operação. |
+| `serviceOrderEventType` / `executionEventType` | Categoria do registro de negócio no OS / execution. |
+| `fromStatus`, `toStatus`, `occurredAt` | Estados envolvidos e momento da transição. |
+| `errorType` | Classificação da falha nos registros que a informam. |
 
-Exemplo de log do OS ao consumir uma reserva:
+Os campos variam conforme a operação; logs de transição podem ter `orderId` sem `eventId`. `trace.id` e `span.id`, quando presentes, relacionam o registro à transação instrumentada. Uma OS pode atravessar vários traces por causa das filas e da outbox; a correlação de negócio usa `correlationId`, `orderId` e `eventId`.
 
-```json
-{
-  "service": "os-service",
-  "correlationId": "10",
-  "orderId": 10,
-  "eventId": "501ddf7b-228e-497c-8b4f-84124f0d35dd",
-  "eventType": "ESTOQUE_RESERVADO",
-  "operation": "processar_evento",
-  "outcome": "confirmado",
-  "message": "Reserva de estoque registrada no histórico da OS"
-}
+## Formatos dos serviços
+
+| Serviço | Registros emitidos |
+|---|---|
+| OS | Publicação e consumo em `message`, nos formatos `[SNS PUBLISHER] {json}` e `[SQS LISTENER] {json}`, com `eventId`, `eventType`, `operation` e `outcome` dentro do JSON. Também emite registros de negócio com `serviceOrderEventType`, `sagaEventType` e `result`. |
+| Billing | Atributos JSON separados para `service`, `correlationId`, `orderId`, `eventId`, `eventType`, `operation` e `outcome`. Registra recebimento, processamento, duplicidade, publicação, compensação e falhas. |
+| Execution | Atributos JSON separados para recebimento e operações do trabalho, com `operation` e `outcome`; transições e falhas usam `executionEventType`. O recebimento inclui `correlationId`, `eventId` e `eventType`. A publicação SNS bem-sucedida não gera um registro próprio de log. |
+
+`eventType` é um nome reservado do New Relic e é descartado quando enviado como atributo principal de um log. No OS, o valor dentro do texto JSON de `message` continua acessível por `aparse` e `jparse`, e os registros complementares usam `sagaEventType`. Em billing e execution, a consulta por tipo depende da informação preservada em outros campos ou no texto; o atributo principal `eventType` não é uma dimensão pesquisável. O campo `type` do envelope SNS/SQS pertence ao contrato de integração e é independente desse tratamento dos logs. [Restrições do New Relic](https://docs.newrelic.com/docs/logs/log-api/log-event-data/).
+
+## Consulta da jornada
+
+Esta consulta reúne os registros de uma OS nos três serviços. O filtro por `orderId` também encontra registros de negócio sem `correlationId`.
+
+```sql
+FROM Log
+SELECT timestamp, container_name, level, message,
+       correlationId, orderId, eventId, sagaEventType,
+       operation, outcome, result, fromStatus, toStatus
+WHERE cluster_name = 'tech-challenge'
+  AND container_name IN (
+    'os-service', 'billing-service', 'execution-service'
+  )
+  AND (correlationId = '20' OR orderId = 20)
+SINCE 24 hours ago
+LIMIT MAX
 ```
 
-Registrar transições após commit, eventos processados/duplicados, falhas de publicação/processamento e resultado do estorno. O aceite de uma publicação não significa processamento confirmado no destino. Não registrar credenciais nem payloads completos.
+Para uma mensagem específica, o filtro é `eventId = '<UUID>'`. A busca por `message LIKE '%<UUID>%'` complementa registros com identificadores dentro do texto. No dashboard, o período selecionado também influencia os resultados.
 
-## Execution e New Relic
+## Interpretação dos resultados
 
-O execution já registra `orderId`, transições e falhas em JSON. Para correlacioná-lo com os demais, pesquisar `correlationId = '10'` **ou** `orderId = 10`. Sua identidade é obtida pelos metadados de Kubernetes/APM. Não exigir novos campos de log no execution para esta integração.
+- **Recebimento:** o listener recebeu a mensagem; isso não confirma o processamento de negócio.
+- **Processamento:** o resultado pertence à operação registrada. No OS, o log de consumo confirmado é emitido após a transação do handler.
+- **Publicação:** `publicado` no OS e `aceito_broker` no billing indicam aceite do envio pelo broker, sem confirmar o processamento no destino.
+- **Compensação:** o resultado descreve a operação local; o significado de `PAGAMENTO_ESTORNADO` está definido na [SAGA](saga.md#falhas-e-compensações).
 
-Infra mantém uma configuração `Instrumentation` por serviço, com nome APM, rótulo `app` e contêiner correspondentes. Execution e billing usam o namespace `tech-challenge`. O OS usa `os-service`. A instrumentação atual substitui a seleção antiga de `tech-challenge-app`.
+`count(*)` mede registros de log; `uniqueCount(eventId)` mede IDs distintos no conjunto consultado. Um mesmo evento pode produzir vários registros e aparecer em mais de um serviço. A ausência de um log não comprova ausência do evento, e o cadastro do serviço no APM não comprova consumo das filas.
 
-O workflow **Deploy New Relic** atualiza a chave em `newrelic`, `tech-challenge` e `os-service`. Depois de instalar o agente ou trocar a chave, recriar os pods afetados pelo fluxo de deploy de cada serviço. Seguir o [roteiro de validação dos microsserviços](../k8s/newrelic/docs/validacao-execution.md).
+## Sinais operacionais
 
-Manter a coleta por stdout no coletor Kubernetes e evitar encaminhamento duplicado pelo agente Java. Validar a auto-instrumentação nos pods e na passagem por SQS/outbox. `correlationId` liga a jornada de negócio; uma OS pode atravessar vários traces. A evidência deve mostrar os trechos realmente capturados pelo agente, sem presumir continuidade automática.
+O acompanhamento combina transações, latência e erros do APM; CPU, memória, réplicas e eventos do Kubernetes; e logs de publicação, consumo, transições e falhas da SAGA.
 
-A duração de transição no execution recebe zero fixo na versão revisada. Essa medida ficará fora dos painéis desta entrega, preservando o código existente.
+O OS expõe em `/actuator/prometheus` as métricas Micrometer `os.eventos.publicados`, `os.eventos.consumidos`, `os.saga.transicoes` e `os.outbox.pendentes`. A coleta Prometheus é independente do agente APM e requer descoberta e scrape do endpoint. Backlog, idade das mensagens e DLQs são métricas do SQS, acessíveis no CloudWatch ou pela integração AWS do New Relic.
 
-## Entrega da observabilidade
-
-- Três serviços visíveis no New Relic, cada um com seu nome.
-- Logs da mesma OS encontrados por correlação ou `orderId`.
-- Painel simples com saúde, erros e falhas da SAGA.
-- Evidências de sucesso, cancelamento e falha com estorno, correlacionando logs de publicação e consumo conforme os [cenários de aceite](saga.md#cenários-de-aceite).
-
-A implementação e a coleta de evidências ainda serão executadas. Esta convenção define o trabalho e não declara uma integração já validada.
+As mensagens são legíveis em português brasileiro. Credenciais, tokens e payloads completos de integração ficam fora dos registros de observabilidade.
