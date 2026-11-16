@@ -65,7 +65,7 @@ flowchart TB
             appos["<b>OS Service</b><br/><i>[Spring Boot]</i><br/>Jornada e histórico da OS, outbox e consumidores idempotentes"]
           end
 
-          subgraph nsbill["Namespace tech-challenge"]
+          subgraph nsbill["Namespace billing-service"]
             direction TB
             svcbill["<b>Service do Billing</b><br/><i>[LoadBalancer → 8080]</i><br/>Balanceia a carga entre os Pods do Billing"]
             hpabill["<b>Horizontal Pod Autoscaler</b><br/><i>[min 2 · max 10 · CPU 70% e memória 80%]</i><br/>HPA do Billing"]
